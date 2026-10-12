@@ -107,6 +107,17 @@ export type Env = {
 
 詳しい設定手順、ライブCTAから予約確定までの流れ、エラー解決方法は [Googleカレンダー連携とライブCTA即時予約](28-Google-Calendar-and-Webinar-Booking.md) を参照してください。
 
+### 予約リマインドのオン・オフ（BOOKING_REMINDERS_ENABLED）
+
+予約カレンダーの標準リマインド（開始24時間前・2時間前の固定文）は、Worker の変数 `BOOKING_REMINDERS_ENABLED` で止められます。
+
+- `false` / `0` / `off` / `no`：止める。承認しても `booking_reminders` に行を入れず、cron も送りません（すでに `pending` の行も送りません）。
+- 未設定・それ以外の値：送る（従来どおり）。
+
+止まるのは予約カレンダーの2通だけです。申し込み・承認・却下・期限切れの通知、イベント予約のリマインド、Meet相談のリマインドはそのまま届きます。
+
+`wrangler deploy` はダッシュボードで足した変数を消すため、フォーク運用ではリポジトリの Variables に `BOOKING_REMINDERS_ENABLED=false` を登録してください。`deploy-cloudflare-worker.yml` が毎回の反映設定に書き込みます。
+
 ### 管理画面の環境変数
 
 Next.js 管理画面で必要な環境変数。Vercel / CF Pages のダッシュボードで設定:

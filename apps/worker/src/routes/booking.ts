@@ -33,6 +33,7 @@ import { attachTagAndFireSideEffects } from '../services/friend-tag-attach.js';
 import {
   DEFAULT_ACCOUNT_SETTINGS,
   IDEMPOTENCY_TTL_MINUTES,
+  isBookingRemindersEnabled,
   type BookingStatus,
 } from '../services/booking-types.js';
 import { awardActivityMileage } from '../services/activity-mileage.js';
@@ -934,6 +935,7 @@ booking.post('/api/booking/admin/bookings', async (c) => {
     bookingId,
     startsAt,
     now: new Date(),
+    enabled: isBookingRemindersEnabled(c.env.BOOKING_REMINDERS_ENABLED),
   });
   let calendarSync: 'not_configured' | 'synced' | 'failed' = 'not_configured';
   try {
@@ -1655,6 +1657,7 @@ booking.patch('/api/booking/admin/requests/:id', async (c) => {
       bookingId: id,
       startsAt: new Date(row.starts_at),
       now: new Date(),
+      enabled: isBookingRemindersEnabled(c.env.BOOKING_REMINDERS_ENABLED),
     });
     try {
       await syncConfirmedBookingToGoogle(c.env.DB, googleCredentials(c.env), id);

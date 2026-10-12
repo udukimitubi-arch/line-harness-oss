@@ -79,6 +79,9 @@ jobs:
           ADMIN_ORIGIN: ${{ vars.ADMIN_ORIGIN }}
           ADMIN_ALLOW_CROSS_SITE: ${{ vars.ADMIN_ALLOW_CROSS_SITE }}
           WORKER_URL: ${{ vars.WORKER_URL }}
+          # Set to "false" to stop salon booking reminders (day_before /
+          # hours_before). Unset keeps the upstream default (on).
+          BOOKING_REMINDERS_ENABLED: ${{ vars.BOOKING_REMINDERS_ENABLED }}
         run: |
           test -n "$D1_DATABASE_ID"
           cd apps/worker
@@ -98,6 +101,12 @@ jobs:
               | (if $w != "" then .vars.WORKER_URL = $w else . end)
             ' dist/line_harness/wrangler.json > "$tmp" && mv "$tmp" dist/line_harness/wrangler.json
             echo "Patched admin CORS vars: ADMIN_ORIGIN=$ADMIN_ORIGIN ADMIN_ALLOW_CROSS_SITE=${ADMIN_ALLOW_CROSS_SITE:-true}"
+          fi
+          if [ -n "$BOOKING_REMINDERS_ENABLED" ]; then
+            tmp="$(mktemp)"
+            jq --arg v "$BOOKING_REMINDERS_ENABLED" '.vars.BOOKING_REMINDERS_ENABLED = $v' \
+              dist/line_harness/wrangler.json > "$tmp" && mv "$tmp" dist/line_harness/wrangler.json
+            echo "Patched BOOKING_REMINDERS_ENABLED=$BOOKING_REMINDERS_ENABLED"
           fi
 
       - name: Deploy to Cloudflare Workers

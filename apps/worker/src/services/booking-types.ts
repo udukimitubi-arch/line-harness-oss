@@ -107,6 +107,18 @@ export const DEFAULT_ACCOUNT_SETTINGS: AccountSettings = {
   min_lead_time_minutes: 60,
 };
 
+// Salon booking reminders (day_before / hours_before) are on by default.
+// Operators can turn them off with the Worker var BOOKING_REMINDERS_ENABLED
+// set to "false" / "0" / "off" / "no". When off, confirmations stop queueing
+// booking_reminders rows and the cron stops sending already-queued ones.
+// Request / approval / rejection / expiry notifications are unaffected, as are
+// event-booking and Meet-consultation reminders.
+export function isBookingRemindersEnabled(value: string | undefined | null): boolean {
+  if (value == null) return true;
+  const v = value.trim().toLowerCase();
+  return !(v === 'false' || v === '0' || v === 'off' || v === 'no');
+}
+
 export const SLOT_GRANULARITY_MINUTES = 30;
 export const REQUEST_TTL_HOURS = 24;
 export const IDEMPOTENCY_TTL_MINUTES = 5;
