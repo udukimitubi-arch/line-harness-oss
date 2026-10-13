@@ -1,4 +1,5 @@
 import { LineClient } from '@line-crm/line-sdk';
+import { applyNotificationTemplate, loadNotificationTexts } from './booking-notification-settings.js';
 
 export type NotificationKind =
   | 'requested'
@@ -41,10 +42,21 @@ export interface SendNotificationParams {
   toLineUserId: string;
   kind: NotificationKind;
   ctx: NotificationContext;
+  // With both set, the account's booking_notification_texts override applies.
+  db?: D1Database;
+  lineAccountId?: string;
 }
 
 export async function sendBookingNotification(params: SendNotificationParams): Promise<void> {
-  const text = renderNotificationText(params.kind, params.ctx);
+  let text = renderNotificationText(params.kind, params.ctx);
+  if (params.db && params.lineAccountId) {
+    const override = (await loadNotificationTexts(params.db, params.lineAccountId))[params.kind];
+    if (override !== undefined) {
+      // Empty override = this notification is turned off.
+      if (override.trim() === '') return;
+      text = applyNotificationTemplate(override, params.ctx);
+    }
+  }
   const client = new LineClient(params.channelAccessToken);
   await client.pushMessage(params.toLineUserId, [{ type: 'text', text }]);
 }

@@ -1,8 +1,11 @@
-// Cron handler: expire 24h-old request bookings + purge idempotency rows.
+// Cron handler: expire request bookings left unanswered + purge idempotency rows.
+// The wait is REQUEST_TTL_HOURS (24h) unless the account sets
+// booking_request_ttl_hours (0 = wait until the booking's start time).
 
 import type { BookingNotificationSender } from './booking-notifier.js';
 import { purgeExpiredIdempotency } from './booking-idempotency.js';
 import { REQUEST_TTL_HOURS } from './booking-types.js';
+import { loadRequestTtlHours } from './booking-notification-settings.js';
 
 interface StaleRow {
   id: string;
@@ -11,6 +14,8 @@ interface StaleRow {
   staff_name: string;
   channel_access_token: string;
   line_user_id: string;
+  line_account_id: string;
+  requested_at: string;
 }
 
 const JST_OFFSET_MS = 9 * 3600_000;
@@ -30,9 +35,8 @@ export async function runExpirer(
   params: RunExpirerParams,
 ): Promise<{ expired: number; idempotencyPurged: number }> {
   const cutoff = new Date(params.now.getTime() - REQUEST_TTL_HOURS * 3600_000).toISOString();
-  const stale = await db
-    .prepare(
-      `SELECT b.id, b.starts_at,
+  const ttlByAccount = await loadRequestTtlHours(db);
+  const select = `SELECT b.id, b.starts_at, b.requested_at, b.line_account_id,
               m.name AS menu_name,
               s.display_name AS staff_name,
               la.channel_access_token,
@@ -42,15 +46,34 @@ export async function runExpirer(
          INNER JOIN staff s ON s.id = b.staff_id
          INNER JOIN line_accounts la ON la.id = b.line_account_id
          INNER JOIN friends f ON f.id = b.friend_id
-        WHERE b.status = 'requested'
+        WHERE b.status = 'requested'`;
+  let candidates: StaleRow[];
+  if (ttlByAccount.size === 0) {
+    const res = await db
+      .prepare(`${select}
           AND b.requested_at < ?
-        LIMIT 200`,
-    )
-    .bind(cutoff)
-    .all<StaleRow>();
-
+        LIMIT 200`)
+      .bind(cutoff)
+      .all<StaleRow>();
+    candidates = res.results;
+  } else {
+    // Some account overrides the wait, so decide per row.
+    const res = await db
+      .prepare(`${select}
+        ORDER BY b.requested_at
+        LIMIT 500`)
+      .all<StaleRow>();
+    const nowMs = params.now.getTime();
+    candidates = res.results
+      .filter((row) => {
+        const hours = ttlByAccount.get(row.line_account_id) ?? REQUEST_TTL_HOURS;
+        if (hours === 0) return new Date(row.starts_at).getTime() <= nowMs;
+        return new Date(row.requested_at).getTime() < nowMs - hours * 3600_000;
+      })
+      .slice(0, 200);
+  }
   let expired = 0;
-  for (const row of stale.results) {
+  for (const row of candidates) {
     // 条件付き UPDATE: cron 走行中に admin が同じ予約を承認/拒否した場合、
     // requested 行に対してのみ expired 化する。changes=0 なら後続処理（通知/reminders cancel）
     // をスキップして、誤通知を防ぐ。
@@ -76,6 +99,8 @@ export async function runExpirer(
           startsAtJst: startsAtJst(row.starts_at),
           hoursBefore: 0,
         },
+        db,
+        lineAccountId: row.line_account_id,
       });
     } catch {
       // 通知失敗は許容、expirer 自体は完了

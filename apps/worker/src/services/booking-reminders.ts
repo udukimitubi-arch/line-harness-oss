@@ -15,6 +15,7 @@ interface DueRow {
   staff_name: string;
   channel_access_token: string;
   line_user_id: string;
+  line_account_id: string;
 }
 
 export interface ProcessRemindersParams {
@@ -43,7 +44,8 @@ export async function processDueReminders(
               m.name AS menu_name,
               s.display_name AS staff_name,
               la.channel_access_token,
-              f.line_user_id
+              f.line_user_id,
+              b.line_account_id
          FROM booking_reminders r
          INNER JOIN bookings b ON b.id = r.booking_id
          INNER JOIN menus m ON m.id = b.menu_id
@@ -74,6 +76,8 @@ export async function processDueReminders(
           startsAtJst: startsAtJst(row.starts_at),
           hoursBefore: params.reminderHoursBefore,
         },
+        db,
+        lineAccountId: row.line_account_id,
       });
       await db
         .prepare(

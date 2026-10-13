@@ -126,7 +126,7 @@ const CLIENT_ONLY: readonly string[] = [
  * rich-menu-groups / integrations あたりが機能として大きい。
  */
 const KNOWN_GAPS: readonly string[] = [
-  // booking (26)
+  // booking (28)
   'DELETE /api/booking/admin/menus/{id}',
   'DELETE /api/booking/admin/staff/{id}',
   'DELETE /api/booking/admin/staff/{id}/google-calendar',
@@ -135,6 +135,8 @@ const KNOWN_GAPS: readonly string[] = [
   'GET /api/booking/admin/menus',
   'GET /api/booking/admin/menus/{id}/staff',
   'GET /api/booking/admin/pending-count',
+  'GET /api/booking/admin/notification-settings',
+  'PUT /api/booking/admin/notification-settings',
   'GET /api/booking/admin/requests',
   'GET /api/booking/admin/staff',
   'GET /api/booking/admin/staff/{id}/availability-rules',

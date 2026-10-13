@@ -33,10 +33,20 @@ import { attachTagAndFireSideEffects } from '../services/friend-tag-attach.js';
 import {
   DEFAULT_ACCOUNT_SETTINGS,
   IDEMPOTENCY_TTL_MINUTES,
+  REQUEST_TTL_HOURS,
   isBookingRemindersEnabled,
   type BookingStatus,
 } from '../services/booking-types.js';
 import { awardActivityMileage } from '../services/activity-mileage.js';
+import {
+  MAX_REQUEST_TTL_HOURS,
+  NOTIFICATION_KINDS,
+  NOTIFICATION_TEXTS_KEY,
+  REQUEST_TTL_KEY,
+  loadNotificationTexts,
+  parseRequestTtlHours,
+  saveAccountSetting,
+} from '../services/booking-notification-settings.js';
 import { GoogleCalendarClient } from '../services/google-calendar.js';
 import {
   buildGoogleOAuthAuthorizationUrl,
@@ -258,7 +268,8 @@ async function notifyForBooking(
               m.name AS menu_name,
               s.display_name AS staff_name,
               la.channel_access_token,
-              f.line_user_id
+              f.line_user_id,
+              b.line_account_id
          FROM bookings b
          INNER JOIN menus m ON m.id = b.menu_id
          INNER JOIN staff s ON s.id = b.staff_id
@@ -273,6 +284,7 @@ async function notifyForBooking(
       staff_name: string;
       channel_access_token: string;
       line_user_id: string;
+      line_account_id: string;
     }>();
   if (!row) return;
   await sendBookingNotification({
@@ -285,6 +297,8 @@ async function notifyForBooking(
       startsAtJst: startsAtJst(row.starts_at),
       hoursBefore: 0,
     },
+    db,
+    lineAccountId: row.line_account_id,
   });
 }
 
@@ -1704,6 +1718,78 @@ booking.get('/api/booking/admin/pending-count', async (c) => {
     .bind(accountId)
     .first<{ cnt: number }>();
   return c.json({ count: row?.cnt ?? 0 });
+});
+
+// Notification text overrides and request expiry for this account.
+// texts: kind -> text ({menu} {staff} {datetime} {hours} are filled in;
+// "" stops that notification). requestTtlHours: 0 = until the start time.
+booking.get('/api/booking/admin/notification-settings', async (c) => {
+  const accountId = await resolveAccountIdAdmin(c);
+  if (!accountId) return c.json({ error: 'missing_account_id' }, 400);
+  const texts = await loadNotificationTexts(c.env.DB, accountId);
+  const ttlRow = await c.env.DB
+    .prepare(`SELECT value FROM account_settings WHERE line_account_id = ? AND key = ?`)
+    .bind(accountId, REQUEST_TTL_KEY)
+    .first<{ value: string }>();
+  return c.json({
+    texts,
+    requestTtlHours: parseRequestTtlHours(ttlRow?.value),
+    defaultRequestTtlHours: REQUEST_TTL_HOURS,
+  });
+});
+
+// Body: { texts?: { [kind]: string | null }, requestTtlHours?: number | null }
+// null puts that item back to the built-in behavior.
+booking.put('/api/booking/admin/notification-settings', async (c) => {
+  const accountId = await resolveAccountIdAdmin(c);
+  if (!accountId) return c.json({ error: 'missing_account_id' }, 400);
+  const body = await c.req
+    .json<{ texts?: Record<string, unknown>; requestTtlHours?: unknown }>()
+    .catch(() => null);
+  if (!body || typeof body !== 'object') return c.json({ error: 'invalid_body' }, 400);
+
+  if (body.texts !== undefined) {
+    if (!body.texts || typeof body.texts !== 'object' || Array.isArray(body.texts)) {
+      return c.json({ error: 'invalid_texts' }, 400);
+    }
+    for (const [kind, text] of Object.entries(body.texts)) {
+      if (!(NOTIFICATION_KINDS as readonly string[]).includes(kind)) {
+        return c.json({ error: 'invalid_kind', kind }, 400);
+      }
+      if (text !== null && (typeof text !== 'string' || text.length > 5000)) {
+        return c.json({ error: 'invalid_text', kind }, 400);
+      }
+    }
+  }
+  if (body.requestTtlHours !== undefined && body.requestTtlHours !== null) {
+    const hours = body.requestTtlHours;
+    if (typeof hours !== 'number' || !Number.isInteger(hours) || hours < 0 || hours > MAX_REQUEST_TTL_HOURS) {
+      return c.json({ error: 'invalid_request_ttl_hours', max: MAX_REQUEST_TTL_HOURS }, 400);
+    }
+  }
+
+  if (body.texts !== undefined) {
+    const texts: Record<string, string> = { ...(await loadNotificationTexts(c.env.DB, accountId)) };
+    for (const [kind, text] of Object.entries(body.texts)) {
+      if (text === null) delete texts[kind];
+      else texts[kind] = text as string;
+    }
+    await saveAccountSetting(
+      c.env.DB,
+      accountId,
+      NOTIFICATION_TEXTS_KEY,
+      Object.keys(texts).length === 0 ? null : JSON.stringify(texts),
+    );
+  }
+  if (body.requestTtlHours !== undefined) {
+    await saveAccountSetting(
+      c.env.DB,
+      accountId,
+      REQUEST_TTL_KEY,
+      body.requestTtlHours === null ? null : String(body.requestTtlHours),
+    );
+  }
+  return c.json({ success: true });
 });
 
 export default booking;
