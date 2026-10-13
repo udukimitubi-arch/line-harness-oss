@@ -156,6 +156,9 @@ jobs:
             | (if $w != "" then .vars.WORKER_PUBLIC_URL = $w else . end)
             | (if $a != "" then .vars.ADMIN_PUBLIC_URL = $a else . end)
             | (if $ap != "" then .vars.ADMIN_PAGES_PROJECT = $ap else . end)
+            # wrangler.toml enables the Workers Cache pilot only for the test
+            # Worker and turns it off for production; match production here.
+            | .cache = {"enabled": false}
           ' dist/line_harness/wrangler.json > "$tmp" && mv "$tmp" dist/line_harness/wrangler.json
 
       - name: Deploy to Cloudflare Workers
