@@ -159,6 +159,13 @@ jobs:
             # wrangler.toml enables the Workers Cache pilot only for the test
             # Worker and turns it off for production; match production here.
             | .cache = {"enabled": false}
+            # Match the Worker that create-line-harness installs
+            # (packages/create-line-harness/src/lib/installed-wrangler.ts):
+            # cron every 5 minutes + every 6 hours, and no TenantScheduler
+            # Durable Object. Without this the first fork deploy switches the
+            # cron to every minute and adds a DO alarm that runs the same jobs.
+            | .triggers.crons = ["*/5 * * * *", "0 */6 * * *"]
+            | del(.durable_objects) | del(.migrations)
           ' dist/line_harness/wrangler.json > "$tmp" && mv "$tmp" dist/line_harness/wrangler.json
 
       - name: Deploy to Cloudflare Workers
