@@ -43,18 +43,53 @@ jobs:
           npx wrangler d1 execute "$D1_DATABASE_NAME" --remote --command \
             "CREATE TABLE IF NOT EXISTS _migrations (name TEXT PRIMARY KEY, applied_at TEXT NOT NULL)"
 
+          # Print the first column of every row returned by a query.
+          list() {
+            npx wrangler d1 execute "$D1_DATABASE_NAME" --remote --command "$1" --json \
+              | node -e "const d=JSON.parse(require('fs').readFileSync(0,'utf8'));for(const r of d[0]?.results??[])console.log(Object.values(r)[0])"
+          }
+
+          list "SELECT name FROM _migrations" > applied.txt
+          tables="$(list "SELECT name FROM sqlite_master WHERE type='table'")"
+
+          # Installs made with create-line-harness record applied migrations in
+          # _line_harness_migrations, not _migrations. Count those as applied so
+          # the first deploy from a fork does not replay every migration.
+          : > legacy.txt
+          if grep -qx '_line_harness_migrations' <<<"$tables"; then
+            list "SELECT name FROM _line_harness_migrations" > legacy.txt
+          fi
+
+          : > pending.txt
           for f in $(ls packages/db/migrations/*.sql | sort); do
             name=$(basename "$f")
-            applied=$(npx wrangler d1 execute "$D1_DATABASE_NAME" --remote \
-              --command "SELECT name FROM _migrations WHERE name = '${name}'" --json \
-              | node -e "const d=JSON.parse(require('fs').readFileSync('/dev/stdin','utf8'));console.log(d[0]?.results?.length||0)")
-            if [ "$applied" = "0" ]; then
+            if ! grep -qxF "$name" applied.txt && ! grep -qxF "$name" legacy.txt; then
+              echo "$name" >> pending.txt
+            fi
+          done
+
+          # Migrations before 041 include table rebuilds (027/029) that are not
+          # safe to re-run. On a database that is already in use, needing one of
+          # them means the ledgers are out of sync, so stop before touching data.
+          if grep -qx 'friends' <<<"$tables" && grep -q '^0[0-3][0-9]_\|^040_' pending.txt; then
+            echo "::error::Live database would replay pre-041 migrations:"
+            cat pending.txt
+            exit 1
+          fi
+
+          for f in $(ls packages/db/migrations/*.sql | sort); do
+            name=$(basename "$f")
+            if grep -qxF "$name" applied.txt; then
+              echo "Skipped: $name"
+            elif grep -qxF "$name" legacy.txt; then
+              echo "Recorded (applied by create-line-harness): $name"
+              npx wrangler d1 execute "$D1_DATABASE_NAME" --remote --command \
+                "INSERT OR IGNORE INTO _migrations (name, applied_at) VALUES ('${name}', datetime('now'))"
+            else
               echo "Applying: $name"
               npx wrangler d1 execute "$D1_DATABASE_NAME" --remote --file="$f"
               npx wrangler d1 execute "$D1_DATABASE_NAME" --remote --command \
                 "INSERT INTO _migrations (name, applied_at) VALUES ('${name}', datetime('now'))"
-            else
-              echo "Skipped: $name"
             fi
           done
 
@@ -79,6 +114,14 @@ jobs:
           ADMIN_ORIGIN: ${{ vars.ADMIN_ORIGIN }}
           ADMIN_ALLOW_CROSS_SITE: ${{ vars.ADMIN_ALLOW_CROSS_SITE }}
           WORKER_URL: ${{ vars.WORKER_URL }}
+          # Set to "false" to stop salon booking reminders (day_before /
+          # hours_before). Unset keeps the upstream default (on).
+          BOOKING_REMINDERS_ENABLED: ${{ vars.BOOKING_REMINDERS_ENABLED }}
+          # Real public URLs of this deployment. Without them the deployed
+          # config carries the placeholder values from wrangler.toml [vars].
+          WORKER_PUBLIC_URL: ${{ vars.WORKER_PUBLIC_URL }}
+          ADMIN_PUBLIC_URL: ${{ vars.ADMIN_PUBLIC_URL }}
+          ADMIN_PAGES_PROJECT: ${{ vars.ADMIN_PAGES_PROJECT }}
         run: |
           test -n "$D1_DATABASE_ID"
           cd apps/worker
@@ -99,6 +142,31 @@ jobs:
             ' dist/line_harness/wrangler.json > "$tmp" && mv "$tmp" dist/line_harness/wrangler.json
             echo "Patched admin CORS vars: ADMIN_ORIGIN=$ADMIN_ORIGIN ADMIN_ALLOW_CROSS_SITE=${ADMIN_ALLOW_CROSS_SITE:-true}"
           fi
+          if [ -n "$BOOKING_REMINDERS_ENABLED" ]; then
+            tmp="$(mktemp)"
+            jq --arg v "$BOOKING_REMINDERS_ENABLED" '.vars.BOOKING_REMINDERS_ENABLED = $v' \
+              dist/line_harness/wrangler.json > "$tmp" && mv "$tmp" dist/line_harness/wrangler.json
+            echo "Patched BOOKING_REMINDERS_ENABLED=$BOOKING_REMINDERS_ENABLED"
+          fi
+          tmp="$(mktemp)"
+          jq --arg acct "$CLOUDFLARE_ACCOUNT_ID" --arg d1 "$D1_DATABASE_ID" \
+             --arg w "$WORKER_PUBLIC_URL" --arg a "$ADMIN_PUBLIC_URL" --arg ap "$ADMIN_PAGES_PROJECT" '
+            .vars.CF_ACCOUNT_ID = $acct
+            | .vars.D1_DATABASE_ID = $d1
+            | (if $w != "" then .vars.WORKER_PUBLIC_URL = $w else . end)
+            | (if $a != "" then .vars.ADMIN_PUBLIC_URL = $a else . end)
+            | (if $ap != "" then .vars.ADMIN_PAGES_PROJECT = $ap else . end)
+            # wrangler.toml enables the Workers Cache pilot only for the test
+            # Worker and turns it off for production; match production here.
+            | .cache = {"enabled": false}
+            # Match the Worker that create-line-harness installs
+            # (packages/create-line-harness/src/lib/installed-wrangler.ts):
+            # cron every 5 minutes + every 6 hours, and no TenantScheduler
+            # Durable Object. Without this the first fork deploy switches the
+            # cron to every minute and adds a DO alarm that runs the same jobs.
+            | .triggers.crons = ["*/5 * * * *", "0 */6 * * *"]
+            | del(.durable_objects) | del(.migrations)
+          ' dist/line_harness/wrangler.json > "$tmp" && mv "$tmp" dist/line_harness/wrangler.json
 
       - name: Deploy to Cloudflare Workers
         uses: cloudflare/wrangler-action@v3

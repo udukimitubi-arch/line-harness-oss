@@ -322,3 +322,76 @@ describe('jstDayWindowUtc', () => {
     expect(jstDayWindowUtc('2026-11-09').startUtc).toBe('2026-11-08T15:00:00.000Z');
   });
 });
+
+describe('/api/booking/admin/notification-settings', () => {
+  function settingsDb(initial: Record<string, string> = {}) {
+    const store = { ...initial };
+    const db = {
+      prepare: (sql: string) => ({
+        bind: (...args: unknown[]) => ({
+          first: async () => {
+            const key = args[1] as string;
+            return key in store ? { value: store[key] } : null;
+          },
+          all: async () => ({ results: [] }),
+          run: async () => {
+            if (sql.startsWith('DELETE')) delete store[args[1] as string];
+            else store[args[2] as string] = args[3] as string;
+            return { meta: { changes: 1 } };
+          },
+        }),
+      }),
+    };
+    return { db, store };
+  }
+
+  test('PUT で文面と期限を保存し、GET で読み返せる', async () => {
+    const { db, store } = settingsDb();
+    const { app, env } = makeApp(db);
+    const put = await app.request('/api/booking/admin/notification-settings?account_id=A1', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ texts: { requested: '', approved: '{datetime} で確定' }, requestTtlHours: 0 }),
+    }, env);
+    expect(put.status).toBe(200);
+    expect(JSON.parse(store.booking_notification_texts)).toEqual({ requested: '', approved: '{datetime} で確定' });
+    expect(store.booking_request_ttl_hours).toBe('0');
+
+    const get = await app.request('/api/booking/admin/notification-settings?account_id=A1', {}, env);
+    const body = await get.json() as { texts: Record<string, string>; requestTtlHours: number | null };
+    expect(body.texts.approved).toBe('{datetime} で確定');
+    expect(body.requestTtlHours).toBe(0);
+  });
+
+  test('null で標準に戻す', async () => {
+    const { db, store } = settingsDb({
+      booking_notification_texts: JSON.stringify({ requested: '' }),
+      booking_request_ttl_hours: '72',
+    });
+    const { app, env } = makeApp(db);
+    const res = await app.request('/api/booking/admin/notification-settings?account_id=A1', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ texts: { requested: null }, requestTtlHours: null }),
+    }, env);
+    expect(res.status).toBe(200);
+    expect(store).toEqual({});
+  });
+
+  test('知らない種類や範囲外の期限は 400', async () => {
+    const { db } = settingsDb();
+    const { app, env } = makeApp(db);
+    const bad1 = await app.request('/api/booking/admin/notification-settings?account_id=A1', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ texts: { foo: 'x' } }),
+    }, env);
+    expect(bad1.status).toBe(400);
+    const bad2 = await app.request('/api/booking/admin/notification-settings?account_id=A1', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ requestTtlHours: 1000 }),
+    }, env);
+    expect(bad2.status).toBe(400);
+  });
+});

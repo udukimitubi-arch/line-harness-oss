@@ -14,8 +14,11 @@ export async function insertConfirmationReminders(
     startsAt: Date;
     now: Date;
     reminderHoursBefore?: number;
+    // false = BOOKING_REMINDERS_ENABLED is off; queue nothing.
+    enabled?: boolean;
   },
 ): Promise<number> {
+  if (args.enabled === false) return 0;
   const hours = args.reminderHoursBefore ?? DEFAULT_ACCOUNT_SETTINGS.reminder_hours_before;
   const dayBefore = new Date(args.startsAt.getTime() - 86400_000);
   const hoursBefore = new Date(args.startsAt.getTime() - hours * 3600_000);

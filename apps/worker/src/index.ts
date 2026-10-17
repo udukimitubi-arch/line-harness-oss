@@ -135,6 +135,9 @@ export type Env = {
     GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY?: string;
     // Keyless Google Calendar connection. User grants access once via OAuth;
     // the Worker keeps a refresh token and never needs a service-account key.
+    // Salon booking reminders (day_before / hours_before). "false" turns
+    // them off; unset = on. See services/booking-types.ts.
+    BOOKING_REMINDERS_ENABLED?: string;
     GOOGLE_OAUTH_CLIENT_ID?: string;
     GOOGLE_OAUTH_CLIENT_SECRET?: string;
     GOOGLE_CALENDAR_BROKER_URL?: string;
