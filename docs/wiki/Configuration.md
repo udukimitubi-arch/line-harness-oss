@@ -107,6 +107,35 @@ export type Env = {
 
 詳しい設定手順、ライブCTAから予約確定までの流れ、エラー解決方法は [Googleカレンダー連携とライブCTA即時予約](28-Google-Calendar-and-Webinar-Booking.md) を参照してください。
 
+### 予約リマインドのオン・オフ（BOOKING_REMINDERS_ENABLED）
+
+予約カレンダーの標準リマインド（開始24時間前・2時間前の固定文）は、Worker の変数 `BOOKING_REMINDERS_ENABLED` で止められます。
+
+- `false` / `0` / `off` / `no`：止める。承認しても `booking_reminders` に行を入れず、cron も送りません（すでに `pending` の行も送りません）。
+- 未設定・それ以外の値：送る（従来どおり）。
+
+止まるのは予約カレンダーの2通だけです。申し込み・承認・却下・期限切れの通知、イベント予約のリマインド、Meet相談のリマインドはそのまま届きます。
+
+`wrangler deploy` はダッシュボードで足した変数を消すため、フォーク運用ではリポジトリの Variables に `BOOKING_REMINDERS_ENABLED=false` を登録してください。`deploy-cloudflare-worker.yml` が毎回の反映設定に書き込みます。
+
+### 予約通知の文面と申し込みの期限（notification-settings API）
+
+予約カレンダーの通知6種類の文面と、申し込みが期限切れになるまでの時間は、アカウントごとに API で変えられます（反映し直しは不要）。値は `account_settings` に保存されます。
+
+```bash
+# 読む
+curl "$W/api/booking/admin/notification-settings?account_id=$A" -H "Authorization: Bearer $K"
+# 変える（null で標準に戻す）
+curl -X PUT "$W/api/booking/admin/notification-settings?account_id=$A" \
+  -H "Authorization: Bearer $K" -H "Content-Type: application/json" \
+  -d '{"texts":{"requested":"","approved":"{datetime} のご予約が確定しました。"},"requestTtlHours":0}'
+```
+
+- `texts` のキー：`requested`（申し込み直後）/ `approved`（承認）/ `rejected`（却下）/ `expired`（期限切れ）/ `day_before`（前日）/ `hours_before`（N時間前）
+- 文面に `{menu}` `{staff}` `{datetime}` `{hours}` を書くと、メニュー名・担当者名・日時・時間数に置きかわります。
+- 空文字 `""` にした通知は送りません。キーが無ければ標準の文面です。
+- `requestTtlHours`：承認待ちのまま何時間たったら期限切れにするか（0〜720）。`0` は「予約の開始時刻を過ぎるまで期限切れにしない」。未設定は24時間。標準の期限切れ文面は「24 時間」と書いているので、期限を変えたら `expired` の文面も合わせて変えてください。
+
 ### 管理画面の環境変数
 
 Next.js 管理画面で必要な環境変数。Vercel / CF Pages のダッシュボードで設定:

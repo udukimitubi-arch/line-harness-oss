@@ -68,6 +68,12 @@ Variables:
 | `VITE_LIFF_ID` | LIFF ID |
 | `VITE_BOT_BASIC_ID` | LINE bot basic ID |
 | `VITE_CALENDAR_CONNECTION_ID` | Google Calendar 連携を使う場合だけ設定 |
+| `WORKER_PUBLIC_URL` / `ADMIN_PUBLIC_URL` / `ADMIN_PAGES_PROJECT` | 実際の Worker URL・管理画面 URL・Pages プロジェクト名。未設定だと wrangler.toml の仮の値で deploy される |
+| `BOOKING_REMINDERS_ENABLED` | `false` で予約の前日 / N時間前リマインドを止める。未設定なら送る |
+
+`create-line-harness` で導入済みの D1 は、適用済み migration を `_line_harness_migrations` に記録しています。Worker の deploy workflow はこれも適用済みとして扱うので、CLI 導入から fork 運用に移っても migration は再実行されません。どちらにも記録が無いまま 041 より前の migration を流そうとした場合は、データに触れる前に止まります。
+
+Cloudflare 側で Worker secret として登録済みの名前（例: `ADMIN_ORIGIN`、`WORKER_URL`）は、Variables に同じ名前で登録しないでください。同名の var と secret は deploy で衝突します。
 
 Worker secrets は `wrangler secret put` で Cloudflare 側に設定します。
 

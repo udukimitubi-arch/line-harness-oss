@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'vitest';
 import { insertConfirmationReminders } from './booking-confirm.js';
+import { isBookingRemindersEnabled } from './booking-types.js';
 
 function fakeDb() {
   const bound: { sql: string; params: unknown[] }[] = [];
@@ -60,5 +61,32 @@ describe('insertConfirmationReminders', () => {
     });
     expect(n).toBe(0);
     expect(batched).toHaveLength(0);
+  });
+
+  test('enabled: false (BOOKING_REMINDERS_ENABLED off): nothing queued', async () => {
+    const { db, bound, batched } = fakeDb();
+    const n = await insertConfirmationReminders(db, {
+      bookingId: 'bk1',
+      startsAt: new Date('2026-07-10T02:00:00Z'),
+      now: NOW,
+      enabled: false,
+    });
+    expect(n).toBe(0);
+    expect(bound).toHaveLength(0);
+    expect(batched).toHaveLength(0);
+  });
+});
+
+describe('isBookingRemindersEnabled', () => {
+  test('unset or truthy values keep reminders on', () => {
+    for (const v of [undefined, null, '', 'true', '1', 'on', 'yes']) {
+      expect(isBookingRemindersEnabled(v)).toBe(true);
+    }
+  });
+
+  test('false-like values turn reminders off', () => {
+    for (const v of ['false', 'FALSE', ' false ', '0', 'off', 'no']) {
+      expect(isBookingRemindersEnabled(v)).toBe(false);
+    }
   });
 });

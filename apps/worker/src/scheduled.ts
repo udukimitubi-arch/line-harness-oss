@@ -19,7 +19,7 @@ import { runEventBookingExpirer } from './services/event-booking-expirer.js';
 import { logRetentionDays } from './services/log-retention.js';
 import { sendEventBookingNotification } from './services/event-booking-notifier.js';
 import { sendBookingNotification } from './services/booking-notifier.js';
-import { DEFAULT_ACCOUNT_SETTINGS } from './services/booking-types.js';
+import { DEFAULT_ACCOUNT_SETTINGS, isBookingRemindersEnabled } from './services/booking-types.js';
 import { lineProxy } from './routes/line-proxy.js';
 import type { Env } from './index.js';
 
@@ -104,17 +104,21 @@ export async function scheduled(
     console.error('token refresh error:', e);
   }
 
-  try {
-    const result = await processDueReminders(env.DB, {
-      now: new Date(),
-      sender: sendBookingNotification,
-      reminderHoursBefore: DEFAULT_ACCOUNT_SETTINGS.reminder_hours_before,
-    });
-    if (result.sent + result.failed > 0) {
-      console.log(`[booking-reminders] sent=${result.sent} failed=${result.failed}`);
+  // BOOKING_REMINDERS_ENABLED=false で予約リマインド (前日 / N時間前) を止める。
+  // 既に pending の行も送らない (行は残るので、再度オンにすれば未来分は送られる)。
+  if (isBookingRemindersEnabled(env.BOOKING_REMINDERS_ENABLED)) {
+    try {
+      const result = await processDueReminders(env.DB, {
+        now: new Date(),
+        sender: sendBookingNotification,
+        reminderHoursBefore: DEFAULT_ACCOUNT_SETTINGS.reminder_hours_before,
+      });
+      if (result.sent + result.failed > 0) {
+        console.log(`[booking-reminders] sent=${result.sent} failed=${result.failed}`);
+      }
+    } catch (e) {
+      console.error('booking-reminders error:', e);
     }
-  } catch (e) {
-    console.error('booking-reminders error:', e);
   }
 
   try {
