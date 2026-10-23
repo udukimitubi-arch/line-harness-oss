@@ -1,3 +1,5 @@
+import { validateMessageContent, parseMessageGroup, packMessageItems } from '@line-crm/shared';
+import { buildMessages } from '../services/message-group.js';
 import { BroadcastDeliveryError } from '../services/broadcast-delivery-error.js';
 import { Hono } from 'hono';
 import {
@@ -346,6 +348,8 @@ broadcasts.post('/api/broadcasts', async (c) => {
       );
     }
 
+    const contentError = validateMessageContent(body.messageType, body.messageContent);
+    if (contentError) return c.json({ success: false, error: contentError }, 400);
     const variableError = unsupportedVariablesError(body.messageContent);
     if (variableError) {
       return c.json({ success: false, error: variableError }, 400);
@@ -458,6 +462,10 @@ broadcasts.put('/api/broadcasts/:id', async (c) => {
       trackLinks?: boolean;
     }>();
 
+    if (body.messageContent !== undefined || body.messageType !== undefined) {
+      const contentError = validateMessageContent(body.messageType ?? existing.message_type, body.messageContent ?? existing.message_content);
+      if (contentError) return c.json({ success: false, error: contentError }, 400);
+    }
     if (body.messageContent !== undefined) {
       const variableError = unsupportedVariablesError(body.messageContent);
       if (variableError) {
@@ -1159,7 +1167,10 @@ broadcasts.post('/api/broadcasts/:id/test-send', async (c) => {
 
     // Build message with test label
     let messageContent = broadcast.message_content;
-    if (broadcast.message_type === 'text') {
+    const group = parseMessageGroup(messageContent);
+    if (group) {
+      messageContent = packMessageItems(group.map(item => item.messageType === 'text' ? { ...item, messageContent: `【テスト配信】\n${item.messageContent}` } : item)).messageContent;
+    } else if (broadcast.message_type === 'text') {
       messageContent = `【テスト配信】\n${messageContent}`;
     }
 
@@ -1191,8 +1202,8 @@ broadcasts.post('/api/broadcasts/:id/test-send', async (c) => {
         assertNoUnresolvedBroadcastVariables(renderedContent);
         const altText = raw.alt_text as string
           || (tracked.messageType === 'flex' ? extractFlexAltText(renderedContent) : undefined);
-        const message = buildMessage(tracked.messageType, renderedContent, altText);
-        await lineClient.pushMessage(friend.line_user_id, [message]);
+        const messages = buildMessages(tracked.messageType, renderedContent, buildMessage, altText);
+        await lineClient.pushMessage(friend.line_user_id, messages);
         sent++;
         await c.env.DB.prepare(
           `INSERT INTO messages_log (id, friend_id, direction, message_type, content, broadcast_id, delivery_type, source, created_at)
