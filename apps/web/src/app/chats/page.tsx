@@ -1,5 +1,8 @@
 'use client'
 
+import MessageComposer, { MessagePreview } from '@/components/messages/message-composer'
+import { packMessageItems, parseMessageGroup, validateMessageContent, type MessageItem } from '@line-crm/shared'
+
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { parseStickerMessageContent, stickerFallback } from '@line-crm/shared'
 import { api, fetchApi } from '@/lib/api'
@@ -206,6 +209,7 @@ function DirectMessagePanel({ friendId, friend, onBack, onSent }: {
   }
 
   function renderContent(msg: MessageLog) {
+    if (msg.direction === 'outgoing' && (() => { try { return Boolean(parseMessageGroup(msg.content)) } catch { return false } })()) return <MessagePreview messageType={msg.messageType} messageContent={msg.content} />
     if (msg.messageType === 'text') return msg.content
     if (msg.messageType === 'sticker') {
       return <StickerMessageImage content={msg.content} />
@@ -344,6 +348,9 @@ export default function ChatsPage() {
   const [detailLoading, setDetailLoading] = useState(false)
   const [error, setError] = useState('')
   const [messageContent, setMessageContent] = useState('')
+  const [groupDraft, setGroupDraft] = useState<MessageItem | null>(null)
+  const selectedChatRef = useRef(selectedChatId)
+  selectedChatRef.current = selectedChatId
   const [pendingImage, setPendingImage] = useState<ImageUploaderValue | null>(null)
   const [sending, setSending] = useState(false)
   const sendLockRef = useRef(false)
@@ -614,6 +621,7 @@ export default function ChatsPage() {
   const handleSelectChat = (chatId: string) => {
     setSelectedChatId(chatId)
     setMessageContent('')
+    setGroupDraft(null)
     setPendingImage(null)
     setShowImagePicker(false)
     setShowComposerSettings(false)
@@ -667,124 +675,43 @@ export default function ChatsPage() {
 
   const handleSendMessage = async () => {
     if (!selectedChatId || sending || sendLockRef.current) return
-    if (!messageContent.trim() && !pendingImage) return
-    const sendingChatId = selectedChatId  // capture the chat id for this send
+    const items: MessageItem[] = []
+    if (pendingImage?.mode === 'line-image') items.push({ messageType: 'image', messageContent: JSON.stringify({ originalContentUrl: pendingImage.originalContentUrl, previewImageUrl: pendingImage.previewImageUrl }) })
+    if (messageContent.trim()) items.push({ messageType: 'text', messageContent: messageContent.trim() })
+    if (!groupDraft && items.length === 0) return
+    const payload = groupDraft ?? packMessageItems(items)
+    const contentError = validateMessageContent(payload.messageType, payload.messageContent)
+    if (contentError) { setError(contentError); return }
+    const sendingChatId = selectedChatId
     sendLockRef.current = true
     setSending(true)
     try {
+      const result = await api.chats.send(sendingChatId, { messageType: payload.messageType, content: payload.messageContent })
+      if (!result.success) throw new Error(result.error)
       const now = new Date().toISOString()
-      // --- Image send path (runs first when image is present) ---
-      if (pendingImage && pendingImage.mode === 'line-image') {
-        const imgPayload = JSON.stringify({
-          originalContentUrl: pendingImage.originalContentUrl,
-          previewImageUrl: pendingImage.previewImageUrl,
-        })
-        await api.chats.send(sendingChatId, { messageType: 'image', content: imgPayload })
-        setPendingImage(null)
-        // Optimistic update for image
-        setChatDetail((prev) => (prev && prev.id === sendingChatId) ? {
-          ...prev,
-          lastMessageAt: now,
-          status: 'in_progress',
-          messages: [
-            ...(prev.messages ?? []),
-            {
-              id: crypto.randomUUID(),
-              direction: 'outgoing',
-              messageType: 'image',
-              content: imgPayload,
-              createdAt: now,
-            },
-          ],
-        } : prev)
-        setChats((prev) => {
-          const exists = prev.some((c) => c.id === sendingChatId)
-          if (!exists) return prev
-          const currentFilter = statusFilterRef.current
-          const currentUnansweredOnly = unansweredOnlyRef.current
-          const updated = prev.map((c) => c.id === sendingChatId ? {
-            ...c,
-            lastMessageAt: now,
-            status: 'in_progress' as const,
-            lastMessageContent: '[画像]',
-            lastMessageDirection: 'outgoing' as const,
-            lastMessageType: 'image' as const,
-          } : c)
-          // 未対応モード時は status filter を skip (worker 側で status を絞ってないため
-          // 楽観更新で applied するとリストが歪む — Codex Round 1)
-          let filtered = currentUnansweredOnly
-            ? updated
-            : (currentFilter === 'all' ? updated : updated.filter((c) => c.status === currentFilter))
-          if (currentUnansweredOnly) {
-            // 未対応モードでは、自分が返信したばかりの chat はもう未対応ではないのでリストから除外
-            filtered = filtered.filter((c) => c.id !== sendingChatId)
-          }
-          return [...filtered].sort((a, b) => {
-            const at = a.lastMessageAt ? new Date(a.lastMessageAt).getTime() : 0
-            const bt = b.lastMessageAt ? new Date(b.lastMessageAt).getTime() : 0
-            return bt - at
-          })
-        })
-      }
-      // --- Text send path (runs independently — both paths execute when both image and text are present) ---
-      if (messageContent.trim()) {
-        const content = messageContent.trim()
-        await api.chats.send(sendingChatId, { content })
+      if (selectedChatRef.current === sendingChatId) {
         setMessageContent('')
-        // Optimistic update: append message locally instead of refetching (prevents scroll jump / full reload feel)
-        // Only mutate chatDetail if it still corresponds to the chat we just sent to
-        setChatDetail((prev) => (prev && prev.id === sendingChatId) ? {
-          ...prev,
-          lastMessageAt: now,
-          status: 'in_progress',
-          messages: [
-            ...(prev.messages ?? []),
-            {
-              id: crypto.randomUUID(),
-              direction: 'outgoing',
-              messageType: 'text',
-              content,
-              createdAt: now,
-            },
-          ],
-        } : prev)
-        setChats((prev) => {
-          // Skip reconciliation if the list no longer contains this chat (e.g. tab changed mid-send)
-          const exists = prev.some((c) => c.id === sendingChatId)
-          if (!exists) return prev
-          const currentFilter = statusFilterRef.current
-          const currentUnansweredOnly = unansweredOnlyRef.current
-          const updated = prev.map((c) => c.id === sendingChatId ? {
-            ...c,
-            lastMessageAt: now,
-            status: 'in_progress' as const,
-            // 一覧の preview も即時更新する。server 側も direction/source を問わず
-            // 実際の最新メッセージを返すため、次回 loadChats() 後も同じ表示になる。
-            lastMessageContent: content,
-            lastMessageDirection: 'outgoing' as const,
-            lastMessageType: 'text' as const,
-          } : c)
-          // Drop rows that no longer match the current tab (e.g. replying from 未読 moves chat to in_progress)
-          // 未対応モード時は status filter を skip (worker 側で status を絞ってないため
-          // 楽観更新で applied するとリストが歪む — Codex Round 1)
-          let filtered = currentUnansweredOnly
-            ? updated
-            : (currentFilter === 'all' ? updated : updated.filter((c) => c.status === currentFilter))
-          if (currentUnansweredOnly) {
-            // 未対応モードでは、自分が返信したばかりの chat はもう未対応ではないのでリストから除外
-            filtered = filtered.filter((c) => c.id !== sendingChatId)
-          }
-          return [...filtered].sort((a, b) => {
-            const at = a.lastMessageAt ? new Date(a.lastMessageAt).getTime() : 0
-            const bt = b.lastMessageAt ? new Date(b.lastMessageAt).getTime() : 0
-            return bt - at
-          })
-        })
+        setGroupDraft(null)
+        setPendingImage(null)
+        setShowImagePicker(false)
       }
-      // 手動返信で未対応が 1 件減るので、サイドバーのバッジを即時更新させる
+      // Keep one send event locally, just as the server does for quota accounting.
+      setChatDetail(previous => previous?.id === sendingChatId ? {
+        ...previous, lastMessageAt: now, status: 'in_progress',
+        messages: [...(previous.messages ?? []), { id: crypto.randomUUID(), direction: 'outgoing', messageType: payload.messageType, content: payload.messageContent, createdAt: now }],
+      } : previous)
+      setChats(previous => {
+        const updated = previous.map(chat => chat.id === sendingChatId ? {
+          ...chat, lastMessageAt: now, status: 'in_progress' as const,
+          lastMessageContent: payload.messageContent, lastMessageType: payload.messageType, lastMessageDirection: 'outgoing' as const,
+        } : chat)
+        const filtered = unansweredOnlyRef.current ? updated.filter(chat => chat.id !== sendingChatId)
+          : statusFilterRef.current === 'all' ? updated : updated.filter(chat => chat.status === statusFilterRef.current)
+        return [...filtered].sort((a, b) => new Date(b.lastMessageAt ?? 0).getTime() - new Date(a.lastMessageAt ?? 0).getTime())
+      })
       window.dispatchEvent(new Event(UNANSWERED_REFRESH_EVENT))
-    } catch {
-      setError('メッセージの送信に失敗しました。')
+    } catch (error) {
+      setError(error instanceof Error ? error.message : 'メッセージの送信に失敗しました。')
     } finally {
       setSending(false)
       sendLockRef.current = false
@@ -899,6 +826,7 @@ export default function ChatsPage() {
                   const previewRaw = chat.lastMessageContent ?? ''
                   const preview = (() => {
                     if (RICH_MENU_SWITCH_RE.test(previewRaw)) return 'リッチメニュー切替'
+                    try { const group = parseMessageGroup(previewRaw); if (group) return `メッセージ ${group.length}件` } catch { /* legacy preview */ }
                     if (chat.lastMessageType === 'image') return '📷 画像'
                     if (chat.lastMessageType === 'flex') return '📋 Flexメッセージ'
                     if (chat.lastMessageType === 'sticker') return '🎨 スタンプ'
@@ -1116,9 +1044,12 @@ export default function ChatsPage() {
                     // 二重になる上、狭い max-w に押し込まれて崩れる。
                     // sticker はバブルに残す — 画像 404 時のテキストフォールバックが
                     // 裸だと青背景に無彩色文字で浮いてしまう (Codex Review 指摘)。
-                    const isBareContent = msg.messageType === 'flex'
+                    const grouped = isOutgoing && (() => { try { return parseMessageGroup(msg.content) !== null } catch { return false } })()
+                    const isBareContent = grouped || msg.messageType === 'flex'
                     let bubbleContent: React.ReactNode
-                    if (msg.messageType === 'flex') {
+                    if (grouped) {
+                      bubbleContent = <MessagePreview messageType={msg.messageType} messageContent={msg.content} />
+                    } else if (msg.messageType === 'flex') {
                       bubbleContent = <FlexPreviewComponent content={msg.content} />
                     } else if (msg.messageType === 'image') {
                       try {
@@ -1250,7 +1181,7 @@ export default function ChatsPage() {
                     </div>
                   </div>
                 )}
-                {(showImagePicker || pendingImage) && (
+                {!groupDraft && (showImagePicker || pendingImage) && (
                   <div className="mb-2">
                     <ImageUploader
                       mode="line-image"
@@ -1260,6 +1191,11 @@ export default function ChatsPage() {
                     />
                   </div>
                 )}
+                {groupDraft && <div className="mb-2 max-h-[45vh] overflow-y-auto">
+                  <fieldset disabled={sending}>
+                    <MessageComposer key={selectedChatId} {...groupDraft} onChange={setGroupDraft} />
+                  </fieldset>
+                </div>}
                 {/* 標準的なチャットコンポーザー (Slack / ChatGPT 型):
                     1枚の枠の中に「上: textarea 全幅 / 下: ツールバー行」。
                     - textarea が幅いっぱい = クリックターゲット最大
@@ -1273,7 +1209,7 @@ export default function ChatsPage() {
                     textareaRef.current?.focus()
                   }}
                 >
-                  <textarea
+                  {!groupDraft && <textarea
                     ref={textareaRef}
                     rows={2}
                     value={messageContent}
@@ -1297,13 +1233,21 @@ export default function ChatsPage() {
                     onKeyDown={handleKeyDown}
                     placeholder="メッセージを入力..."
                     className="block w-full resize-none border-0 bg-transparent px-4 pt-3 pb-1 text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-0"
-                  />
+                  />}
                   <div className="flex items-center gap-0.5 px-2 pb-2">
+                    {!groupDraft && <Button type="button" size="sm" variant="ghost" disabled={sending} onClick={() => {
+                      const items: MessageItem[] = []
+                      if (pendingImage?.mode === 'line-image') items.push({ messageType: 'image', messageContent: JSON.stringify({ originalContentUrl: pendingImage.originalContentUrl, previewImageUrl: pendingImage.previewImageUrl }) })
+                      if (messageContent.trim()) items.push({ messageType: 'text', messageContent })
+                      if (!items.length) items.push({ messageType: 'text', messageContent: '' })
+                      setGroupDraft(packMessageItems(items))
+                    }}>複数・Flex</Button>}
                     <Button
                       type="button"
                       size="sm"
                       shape="square"
                       variant={showImagePicker || pendingImage ? 'primary' : 'ghost'}
+                      disabled={Boolean(groupDraft) || sending}
                       onClick={() => setShowImagePicker((v) => !v)}
                       title="画像を添付"
                       aria-label="画像を添付"
@@ -1336,7 +1280,7 @@ export default function ChatsPage() {
                       variant="primary"
                       loading={sending}
                       onClick={handleSendMessage}
-                      disabled={sending || (!messageContent.trim() && !pendingImage)}
+                      disabled={sending || (!groupDraft && !messageContent.trim() && !pendingImage)}
                     >
                       送信
                     </Button>
