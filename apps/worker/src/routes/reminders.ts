@@ -8,6 +8,7 @@ import {
   deleteReminder,
   getReminderSteps,
   createReminderStep,
+  isValidReminderSendTime,
   deleteReminderStep,
   enrollFriendInReminder,
   getFriendReminders,
@@ -70,6 +71,8 @@ reminders.get('/api/reminders/:id', async (c) => {
           id: s.id,
           reminderId: s.reminder_id,
           offsetMinutes: s.offset_minutes,
+          offsetDays: s.offset_days ?? null,
+          sendTime: s.send_time ?? null,
           messageType: s.message_type,
           messageContent: s.message_content,
           createdAt: s.created_at,
@@ -128,16 +131,38 @@ reminders.delete('/api/reminders/:id', async (c) => {
 reminders.post('/api/reminders/:id/steps', async (c) => {
   try {
     const reminderId = c.req.param('id');
-    const body = await c.req.json<{ offsetMinutes: number; messageType: string; messageContent: string }>();
-    if (body.offsetMinutes === undefined || !body.messageType || !body.messageContent) {
-      return c.json({ success: false, error: 'offsetMinutes, messageType, messageContent are required' }, 400);
+    const body = await c.req.json<{
+      offsetMinutes?: number;
+      offsetDays?: number | null;
+      sendTime?: string | null;
+      messageType: string;
+      messageContent: string;
+    }>();
+    // 送る時刻は「基準時刻から offsetMinutes 分」か「offsetDays 日前の sendTime（HH:MM）」のどちらか。
+    const scheduled = body.sendTime !== undefined && body.sendTime !== null && body.sendTime !== '';
+    if (scheduled && !isValidReminderSendTime(body.sendTime)) {
+      return c.json({ success: false, error: 'sendTime must be HH:MM' }, 400);
+    }
+    if (scheduled && body.offsetDays !== undefined && body.offsetDays !== null
+      && (!Number.isInteger(body.offsetDays) || body.offsetDays < 0 || body.offsetDays > 365)) {
+      return c.json({ success: false, error: 'offsetDays must be an integer between 0 and 365' }, 400);
+    }
+    if ((!scheduled && body.offsetMinutes === undefined) || !body.messageType || !body.messageContent) {
+      return c.json({ success: false, error: 'offsetMinutes (or sendTime), messageType, messageContent are required' }, 400);
     }
     const contentError = validateMessageContent(body.messageType, body.messageContent);
     if (contentError) return c.json({ success: false, error: contentError }, 400);
-    const step = await createReminderStep(c.env.DB, { reminderId, ...body });
+    const step = await createReminderStep(c.env.DB, {
+      reminderId,
+      offsetMinutes: body.offsetMinutes ?? 0,
+      offsetDays: scheduled ? body.offsetDays ?? 0 : null,
+      sendTime: scheduled ? body.sendTime : null,
+      messageType: body.messageType,
+      messageContent: body.messageContent,
+    });
     return c.json({
       success: true,
-      data: { id: step.id, reminderId: step.reminder_id, offsetMinutes: step.offset_minutes, messageType: step.message_type, createdAt: step.created_at },
+      data: { id: step.id, reminderId: step.reminder_id, offsetMinutes: step.offset_minutes, offsetDays: step.offset_days ?? null, sendTime: step.send_time ?? null, messageType: step.message_type, createdAt: step.created_at },
     }, 201);
   } catch (err) {
     console.error('POST /api/reminders/:id/steps error:', err);

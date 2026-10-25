@@ -209,7 +209,7 @@ export default function MenusPage() {
         </LayerCard>
       )}
 
-      {editing && <Modal menu={editing} tags={tags} onSave={save} onClose={() => setEditing(null)} />}
+      {editing && <Modal menu={editing} tags={tags} accountId={selectedAccountId} onSave={save} onClose={() => setEditing(null)} />}
       <Dialog.Root role="alertdialog" open={deleteTarget !== null} onOpenChange={(open) => { if (!open) setDeleteTarget(null) }}><Dialog><Dialog.Title>メニューを削除しますか？</Dialog.Title><Dialog.Description className="mt-2">「{deleteTarget?.name}」を削除します。既存予約は維持されます。</Dialog.Description><div className="mt-6 flex justify-end gap-2"><Button type="button" variant="secondary" onClick={() => setDeleteTarget(null)}>キャンセル</Button><Button type="button" variant="destructive" onClick={remove}>削除</Button></div></Dialog></Dialog.Root>
     </div>
   )
@@ -218,17 +218,41 @@ export default function MenusPage() {
 function Modal({
   menu,
   tags,
+  accountId,
   onSave,
   onClose,
 }: {
   menu: Partial<BookingMenu>
   tags: Tag[]
+  accountId: string | null
   onSave: (m: Partial<BookingMenu>) => Promise<void>
   onClose: () => void
 }) {
   const [form, setForm] = useState<Partial<BookingMenu>>(menu)
   const [saving, setSaving] = useState(false)
   const [err, setErr] = useState<string | null>(null)
+  // 承認したときに自動で登録するリマインダー（既存メニューだけ設定できる）
+  const [reminderOptions, setReminderOptions] = useState<Array<{ id: string; name: string }>>([])
+  const [reminderIds, setReminderIds] = useState<string[]>([])
+  const [remindersLoaded, setRemindersLoaded] = useState(false)
+
+  useEffect(() => {
+    if (!accountId || !menu.id) return
+    let cancelled = false
+    Promise.all([api.reminders.list({ accountId }), bookingApi.getMenuReminders(accountId, menu.id)])
+      .then(([list, linked]) => {
+        if (cancelled) return
+        if (list.success) setReminderOptions(list.data.map((r) => ({ id: r.id, name: r.name })))
+        setReminderIds(linked.reminder_ids)
+        setRemindersLoaded(true)
+      })
+      .catch(() => {
+        // 読めなくてもメニュー編集は続けられる
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [accountId, menu.id])
 
   function set<K extends keyof BookingMenu>(k: K, v: BookingMenu[K] | string | null) {
     setForm({ ...form, [k]: v })
@@ -238,6 +262,9 @@ function Modal({
     setSaving(true)
     setErr(null)
     try {
+      if (accountId && form.id && remindersLoaded) {
+        await bookingApi.setMenuReminders(accountId, form.id, reminderIds)
+      }
       await onSave(form)
     } catch (e) {
       setErr(e instanceof Error ? e.message : String(e))
@@ -309,6 +336,30 @@ function Modal({
             />
             <p className="mt-1 text-xs text-gray-500">
               このメニューが予約されると、申込者の友だちに自動でこのタグが付きます。タグは既存のものから選択してください (友だち画面 / シナリオ等で使われているタグ)。
+            </p>
+          </div>
+          <div>
+            <p className="text-sm font-medium text-gray-700">承認したときに登録するリマインダー</p>
+            {!form.id ? (
+              <p className="mt-1 text-xs text-gray-500">メニューを保存したあと、編集画面で選べます。</p>
+            ) : reminderOptions.length === 0 ? (
+              <p className="mt-1 text-xs text-gray-500">リマインダーがありません。「リマインダー」の画面で作ると、ここで選べます。</p>
+            ) : (
+              <div className="mt-1 space-y-1">
+                {reminderOptions.map((r) => (
+                  <Checkbox
+                    key={r.id}
+                    label={r.name}
+                    checked={reminderIds.includes(r.id)}
+                    onCheckedChange={(checked) =>
+                      setReminderIds((prev) => (checked ? [...prev, r.id] : prev.filter((id) => id !== r.id)))
+                    }
+                  />
+                ))}
+              </div>
+            )}
+            <p className="mt-1 text-xs text-gray-500">
+              予約を承認すると、予約の開始時刻を基準にして登録します。キャンセル・却下・期限切れで外れます。
             </p>
           </div>
           <Checkbox

@@ -1,4 +1,5 @@
 import { buildMessages } from './message-group.js';
+import { expandVariables, resolveMetadata } from './step-delivery.js';
 import { extractFlexAltText } from '../utils/flex-alt-text.js';
 
 /**
@@ -49,8 +50,13 @@ export async function processReminderDeliveries(
         }
       }
 
+      // {{name}} や {{metadata.予約日}} などの差し込み（シナリオと同じ書き方）。
+      const metadata = await resolveMetadata(db, friend);
+      const friendForVars = { ...friend, metadata };
+
       for (const step of fr.steps) {
-        const messages = buildMessages(step.message_type, step.message_content, buildMessage);
+        const content = expandVariables(step.message_content, friendForVars, undefined, step.message_type);
+        const messages = buildMessages(step.message_type, content, buildMessage);
         await deliveryClient.pushMessage(friend.line_user_id, messages);
 
         // Mark as delivered AFTER successful send.
@@ -69,7 +75,7 @@ export async function processReminderDeliveries(
             `INSERT INTO messages_log (id, friend_id, direction, message_type, content, source, created_at)
              VALUES (?, ?, 'outgoing', ?, ?, 'reminder', ?)`,
           )
-          .bind(logId, friend.id, step.message_type, step.message_content, jstNow())
+          .bind(logId, friend.id, step.message_type, content, jstNow())
           .run();
       }
 

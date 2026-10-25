@@ -29,6 +29,7 @@ import {
 } from '../services/booking-idempotency.js';
 import { sendBookingNotification } from '../services/booking-notifier.js';
 import { insertConfirmationReminders } from '../services/booking-confirm.js';
+import { queueBookingEvent } from '../services/booking-automation-hooks.js';
 import { attachTagAndFireSideEffects } from '../services/friend-tag-attach.js';
 import {
   DEFAULT_ACCOUNT_SETTINGS,
@@ -534,6 +535,8 @@ booking.post('/api/liff/booking/requests', async (c) => {
     ),
   );
 
+  queueBookingEvent(c, bookingId, 'requested');
+
   // notifyForBooking と同じく fire-and-forget。タグ付与失敗は予約成功扱い。
   // attachTagAndFireSideEffects は POST /api/friends/:id/tags と同じ side effects
   // (tag_added シナリオ enrollment + tag_change イベント) を発火する。
@@ -968,6 +971,7 @@ booking.post('/api/booking/admin/bookings', async (c) => {
       console.error('booking notify (proxy-create) failed:', err),
     ),
   );
+  queueBookingEvent(c, bookingId, 'approved');
   return c.json({ booking_id: bookingId, status: 'confirmed', calendar_sync: calendarSync }, 201);
 });
 
@@ -1702,6 +1706,9 @@ booking.patch('/api/booking/admin/requests/:id', async (c) => {
       ),
     );
   }
+
+  if (next === 'confirmed') queueBookingEvent(c, id, 'approved');
+  else if (next === 'rejected' || next === 'cancelled' || next === 'expired') queueBookingEvent(c, id, next);
 
   return c.json({ status: next });
 });

@@ -64,6 +64,7 @@ import { adminAuth } from './routes/admin-auth.js';
 import { resolveCorsOrigin } from './middleware/admin-auth-config.js';
 import { defaultCachePolicyMiddleware } from './middleware/cache-policy.js';
 import booking from './routes/booking.js';
+import bookingAutomation from './routes/booking-automation.js';
 import events from './routes/events.js';
 import { trafficPools } from './routes/traffic-pools.js';
 import { meetCallback } from './routes/meet-callback.js';
@@ -140,6 +141,8 @@ export type Env = {
     // Salon booking reminders (day_before / hours_before). "false" turns
     // them off; unset = on. See services/booking-types.ts.
     BOOKING_REMINDERS_ENABLED?: string;
+    // Booking admin notifications to Chatwork (services/booking-automation.ts).
+    CHATWORK_API_TOKEN?: string;
     GOOGLE_OAUTH_CLIENT_ID?: string;
     GOOGLE_OAUTH_CLIENT_SECRET?: string;
     GOOGLE_CALENDAR_BROKER_URL?: string;
@@ -251,6 +254,7 @@ app.route('/', autoReplies);
 app.route('/', adminAuth);
 app.route('/', trafficPools);
 app.route('/', booking);
+app.route('/', bookingAutomation);
 app.route('/', events);
 app.route('/', accountSettings);
 app.route('/', meetCallback);

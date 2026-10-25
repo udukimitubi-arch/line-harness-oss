@@ -14,9 +14,39 @@ export interface ReminderStepRow {
   id: string;
   reminder_id: string;
   offset_minutes: number;
+  /** 基準日の N 日前（send_time とセット）。NULL なら offset_minutes で送る */
+  offset_days?: number | null;
+  /** 'HH:MM'（日本時間）。NULL なら offset_minutes で送る */
+  send_time?: string | null;
   message_type: string;
   message_content: string;
   created_at: string;
+}
+
+const SEND_TIME_RE = /^([01]\d|2[0-3]):([0-5]\d)$/;
+
+/** 'HH:MM'（00:00〜23:59）として正しいか */
+export function isValidReminderSendTime(value: unknown): value is string {
+  return typeof value === 'string' && SEND_TIME_RE.test(value);
+}
+
+/**
+ * ステップの配信時刻（UNIX ミリ秒）。
+ * - send_time あり: 基準時刻の日本時間の日付から offset_days 日前の send_time（日本時間）
+ * - send_time なし: 基準時刻 + offset_minutes 分
+ */
+export function reminderStepDueAt(
+  targetDate: string,
+  step: Pick<ReminderStepRow, 'offset_minutes' | 'offset_days' | 'send_time'>,
+): number {
+  const base = new Date(targetDate).getTime();
+  const match = step.send_time ? SEND_TIME_RE.exec(step.send_time) : null;
+  if (!match) return base + step.offset_minutes * 60_000;
+  const jstOffsetMs = 9 * 3600_000;
+  const jst = new Date(base + jstOffsetMs);
+  const days = step.offset_days ?? 0;
+  const jstMidnightAsUtc = Date.UTC(jst.getUTCFullYear(), jst.getUTCMonth(), jst.getUTCDate() - days);
+  return jstMidnightAsUtc + (Number(match[1]) * 60 + Number(match[2])) * 60_000 - jstOffsetMs;
 }
 
 export interface FriendReminderRow {
@@ -82,12 +112,24 @@ export async function getReminderSteps(db: D1Database, reminderId: string): Prom
 
 export async function createReminderStep(
   db: D1Database,
-  input: { reminderId: string; offsetMinutes: number; messageType: string; messageContent: string },
+  input: {
+    reminderId: string;
+    offsetMinutes: number;
+    messageType: string;
+    messageContent: string;
+    /** sendTime とセットで「N 日前の HH:MM」。 */
+    offsetDays?: number | null;
+    sendTime?: string | null;
+  },
 ): Promise<ReminderStepRow> {
   const id = crypto.randomUUID();
   const now = jstNow();
-  await db.prepare(`INSERT INTO reminder_steps (id, reminder_id, offset_minutes, message_type, message_content, created_at) VALUES (?, ?, ?, ?, ?, ?)`)
-    .bind(id, input.reminderId, input.offsetMinutes, input.messageType, input.messageContent, now).run();
+  const scheduled = isValidReminderSendTime(input.sendTime);
+  const offsetDays = scheduled ? Math.max(0, Math.trunc(input.offsetDays ?? 0)) : null;
+  // 並び順（offset_minutes ASC）を保つため、日時指定のステップも目安の分を入れておく。
+  const offsetMinutes = scheduled ? -(offsetDays as number) * 1440 : input.offsetMinutes;
+  await db.prepare(`INSERT INTO reminder_steps (id, reminder_id, offset_minutes, offset_days, send_time, message_type, message_content, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`)
+    .bind(id, input.reminderId, offsetMinutes, offsetDays, scheduled ? input.sendTime : null, input.messageType, input.messageContent, now).run();
   return (await db.prepare(`SELECT * FROM reminder_steps WHERE id = ?`).bind(id).first<ReminderStepRow>())!;
 }
 
@@ -141,8 +183,7 @@ export async function getDueReminderDeliveries(db: D1Database, now: string): Pro
     // 未配信で配信時刻が到来しているステップをフィルタ
     const dueSteps = steps.filter((step) => {
       if (deliveredIds.has(step.id)) return false;
-      const targetTime = new Date(fr.target_date).getTime() + step.offset_minutes * 60_000;
-      return targetTime <= new Date(now).getTime();
+      return reminderStepDueAt(fr.target_date, step) <= new Date(now).getTime();
     });
 
     if (dueSteps.length > 0) {

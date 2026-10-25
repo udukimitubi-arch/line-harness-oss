@@ -239,6 +239,60 @@ const spec = {
         responses: { '200': { description: 'Tag deleted' } },
       },
     },
+    // ── Booking automation（予約のきっかけ） ───────────────────────────────
+    '/api/booking/admin/menus/{id}/reminders': {
+      get: {
+        tags: ['Booking'],
+        summary: 'メニューに紐づくリマインダー（承認時に自動登録）',
+        parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }, { name: 'account_id', in: 'query', required: true, schema: { type: 'string' } }],
+        responses: { '200': { description: '{ reminder_ids: string[] }' } },
+      },
+      put: {
+        tags: ['Booking'],
+        summary: 'メニューに紐づくリマインダーを置き換える',
+        parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }, { name: 'account_id', in: 'query', required: true, schema: { type: 'string' } }],
+        requestBody: { content: { 'application/json': { schema: { type: 'object', properties: { reminder_ids: { type: 'array', items: { type: 'string' } } }, required: ['reminder_ids'] } } } },
+        responses: { '200': { description: 'Saved' } },
+      },
+    },
+    '/api/booking/admin/notify-targets': {
+      get: {
+        tags: ['Booking'],
+        summary: '予約のきっかけごとの管理者通知の一覧',
+        parameters: [{ name: 'account_id', in: 'query', required: true, schema: { type: 'string' } }],
+        responses: { '200': { description: '{ targets, chatwork_token_set }' } },
+      },
+      post: {
+        tags: ['Booking'],
+        summary: '管理者通知を追加（チャットワーク / Webhook）',
+        parameters: [{ name: 'account_id', in: 'query', required: true, schema: { type: 'string' } }],
+        requestBody: { content: { 'application/json': { schema: { type: 'object', properties: { event: { type: 'string', enum: ['requested', 'approved', 'rejected', 'expired', 'cancelled', 'ended'] }, channel: { type: 'string', enum: ['chatwork', 'webhook'] }, target: { type: 'string', description: 'チャットワークのルームID、または Webhook の https URL' }, message_template: { type: 'string', description: '差し込み: {event} {name} {date} {start} {end} {datetime} {menu} {staff} {status} {note} {admin_url}' }, minutes_after: { type: 'integer', description: 'event=ended のとき、終了から何分後に送るか（既定30）' }, is_active: { type: 'boolean' } }, required: ['event', 'channel', 'target', 'message_template'] } } } },
+        responses: { '201': { description: 'Created' } },
+      },
+    },
+    '/api/booking/admin/notify-targets/{id}': {
+      put: {
+        tags: ['Booking'],
+        summary: '管理者通知を更新',
+        parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }, { name: 'account_id', in: 'query', required: true, schema: { type: 'string' } }],
+        requestBody: { content: { 'application/json': { schema: { type: 'object', properties: { event: { type: 'string', enum: ['requested', 'approved', 'rejected', 'expired', 'cancelled', 'ended'] }, channel: { type: 'string', enum: ['chatwork', 'webhook'] }, target: { type: 'string', description: 'チャットワークのルームID、または Webhook の https URL' }, message_template: { type: 'string', description: '差し込み: {event} {name} {date} {start} {end} {datetime} {menu} {staff} {status} {note} {admin_url}' }, minutes_after: { type: 'integer', description: 'event=ended のとき、終了から何分後に送るか（既定30）' }, is_active: { type: 'boolean' } } } } } },
+        responses: { '200': { description: 'Updated' } },
+      },
+      delete: {
+        tags: ['Booking'],
+        summary: '管理者通知を削除',
+        parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }, { name: 'account_id', in: 'query', required: true, schema: { type: 'string' } }],
+        responses: { '200': { description: 'Deleted' } },
+      },
+    },
+    '/api/booking/admin/notify-targets/{id}/test': {
+      post: {
+        tags: ['Booking'],
+        summary: '見本の予約で管理者通知を1回送る（お客さんには送らない）',
+        parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }, { name: 'account_id', in: 'query', required: true, schema: { type: 'string' } }],
+        responses: { '200': { description: 'Sent' }, '502': { description: 'Send failed' } },
+      },
+    },
     // ── Scenarios ────────────────────────────────────────────────────────────
     '/api/scenarios': {
       get: { tags: ['Scenarios'], summary: 'シナリオ一覧取得', responses: { '200': { description: 'All scenarios' } } },
