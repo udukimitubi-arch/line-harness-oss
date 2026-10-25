@@ -13,6 +13,8 @@ import { refreshLineAccessTokens } from './services/token-refresh.js';
 import { processInsightFetch } from './services/insight-fetcher.js';
 import { processDueReminders } from './services/booking-reminders.js';
 import { runExpirer } from './services/booking-expirer.js';
+import { handleBookingEvent, processBookingEnded } from './services/booking-automation.js';
+import { bookingAutomationDeps } from './services/booking-automation-hooks.js';
 import { processDueEventReminders } from './services/event-booking-reminders.js';
 import { processDueMeetConsultationReminders } from './services/meet-consultation-reminders.js';
 import { runEventBookingExpirer } from './services/event-booking-expirer.js';
@@ -220,6 +222,14 @@ export async function scheduled(
     // 5分毎に全アカウント分の quota API を叩くと bot/info を分足→5分に
     // 落とした経緯 (上のコメント参照) と同じ過剰負荷になる。
     jobs.push(checkAccountHealth(env.DB, { checkQuota: isHourlyTick(event) }));
+    // 予約の「終了後」のきっかけ（友だち情報の更新・自動ルール・管理者通知）。
+    jobs.push(
+      processBookingEnded(bookingAutomationDeps(env)).then((result) => {
+        if (result.metadata + result.fired > 0) {
+          console.log(`[booking-ended] metadata=${result.metadata} fired=${result.fired}`);
+        }
+      }),
+    );
     jobs.push(
       processPendingMileageEvents(env.DB, { limit: 100 }).then((result) => {
         if (result.claimed > 0) {
@@ -259,6 +269,7 @@ export async function scheduled(
       const result = await runExpirer(env.DB, {
         now: new Date(),
         sender: sendBookingNotification,
+        onExpired: (bookingId) => handleBookingEvent(bookingAutomationDeps(env), bookingId, 'expired'),
       });
       console.log(
         `[booking-expirer] expired=${result.expired} idempotency_purged=${result.idempotencyPurged}`,

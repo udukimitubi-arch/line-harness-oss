@@ -1043,7 +1043,7 @@ export const api = {
       }),
     delete: (id: string) =>
       fetchApi<ApiResponse<null>>(`/api/reminders/${id}`, { method: 'DELETE' }),
-    addStep: (id: string, data: { offsetMinutes: number; messageType: string; messageContent: string }) =>
+    addStep: (id: string, data: { offsetMinutes: number; offsetDays?: number; sendTime?: string; messageType: string; messageContent: string }) =>
       fetchApi<ApiResponse<ReminderStep>>(`/api/reminders/${id}/steps`, {
         method: 'POST',
         body: JSON.stringify(data),
@@ -1788,6 +1788,14 @@ export const bookingApi = {
   deleteMenu: (accountId: string, id: string) =>
     fetchApi<{ ok: true }>(withAccount(`/api/booking/admin/menus/${id}`, accountId), {
       method: 'DELETE',
+    }),
+  // 承認時に自動登録するリマインダー（メニューごと）
+  getMenuReminders: (accountId: string, menuId: string) =>
+    fetchApi<{ reminder_ids: string[] }>(withAccount(`/api/booking/admin/menus/${menuId}/reminders`, accountId)),
+  setMenuReminders: (accountId: string, menuId: string, reminderIds: string[]) =>
+    fetchApi<{ reminder_ids: string[] }>(withAccount(`/api/booking/admin/menus/${menuId}/reminders`, accountId), {
+      method: 'PUT',
+      body: JSON.stringify({ reminder_ids: reminderIds }),
     }),
   // Staff
   listStaff: (accountId: string) =>

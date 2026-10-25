@@ -663,6 +663,9 @@ export interface ReminderStep {
   id: string;
   reminderId: string;
   offsetMinutes: number;
+  /** sendTime とセットで「基準日の N 日前の HH:MM（日本時間）」。 */
+  offsetDays?: number | null;
+  sendTime?: string | null;
   messageType: MessageType;
   messageContent: string;
   createdAt: string;
@@ -822,7 +825,13 @@ export type AutomationEventType =
   | "cv_fire"
   | "message_received"
   | "postback_received"
-  | "calendar_booked";
+  | "calendar_booked"
+  | "booking_requested"
+  | "booking_approved"
+  | "booking_rejected"
+  | "booking_expired"
+  | "booking_cancelled"
+  | "booking_ended";
 
 export interface AutomationAction {
   type: "add_tag" | "remove_tag" | "start_scenario" | "send_message" | "send_webhook" | "switch_rich_menu";

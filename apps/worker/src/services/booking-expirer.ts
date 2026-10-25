@@ -28,6 +28,8 @@ function startsAtJst(utcIso: string): string {
 export interface RunExpirerParams {
   now: Date;
   sender: BookingNotificationSender;
+  /** 期限切れにした予約ごとに呼ぶ（予約のきっかけ。services/booking-automation.ts）。 */
+  onExpired?: (bookingId: string) => Promise<void>;
 }
 
 export async function runExpirer(
@@ -104,6 +106,13 @@ export async function runExpirer(
       });
     } catch {
       // 通知失敗は許容、expirer 自体は完了
+    }
+    if (params.onExpired) {
+      try {
+        await params.onExpired(row.id);
+      } catch (err) {
+        console.error('booking expired event failed:', err);
+      }
     }
     expired++;
   }

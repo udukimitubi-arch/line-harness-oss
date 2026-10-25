@@ -27,6 +27,8 @@ interface ReminderStep {
   id: string
   reminderId: string
   offsetMinutes: number
+  offsetDays?: number | null
+  sendTime?: string | null
   messageType: string
   messageContent: string
   createdAt: string
@@ -42,9 +44,30 @@ interface CreateFormState {
 }
 
 interface StepFormState {
+  // minutes: 基準時刻から何分 / daysAt: 基準日の N 日前の HH:MM（日本時間）
+  timingMode: 'minutes' | 'daysAt'
   offsetMinutes: number
+  offsetDays: number
+  sendTime: string
   messageType: string
   messageContent: string
+}
+
+const emptyStepForm: StepFormState = {
+  timingMode: 'minutes',
+  offsetMinutes: -60,
+  offsetDays: 1,
+  sendTime: '18:00',
+  messageType: 'text',
+  messageContent: '',
+}
+
+function formatStepTiming(step: Pick<ReminderStep, 'offsetMinutes' | 'offsetDays' | 'sendTime'>): string {
+  if (step.sendTime) {
+    const days = step.offsetDays ?? 0
+    return days === 0 ? `当日 ${step.sendTime}` : days === 1 ? `前日 ${step.sendTime}` : `${days}日前 ${step.sendTime}`
+  }
+  return formatOffset(step.offsetMinutes)
 }
 
 function formatOffset(minutes: number): string {
@@ -108,11 +131,7 @@ export default function RemindersPage() {
 
   // Step form state
   const [showStepForm, setShowStepForm] = useState(false)
-  const [stepForm, setStepForm] = useState<StepFormState>({
-    offsetMinutes: -60,
-    messageType: 'text',
-    messageContent: '',
-  })
+  const [stepForm, setStepForm] = useState<StepFormState>(emptyStepForm)
   const [stepSaving, setStepSaving] = useState(false)
   const [stepFormError, setStepFormError] = useState('')
   const [pendingDelete, setPendingDelete] = useState<{ kind: 'reminder' | 'step'; id: string } | null>(null)
@@ -227,14 +246,19 @@ export default function RemindersPage() {
     setStepSaving(true)
     setStepFormError('')
     try {
+      if (stepForm.timingMode === 'daysAt' && !/^([01]\d|2[0-3]):[0-5]\d$/.test(stepForm.sendTime)) {
+        setStepFormError('時刻は 18:00 のように入力してください')
+        return
+      }
       const res = await api.reminders.addStep(expandedId, {
         offsetMinutes: stepForm.offsetMinutes,
+        ...(stepForm.timingMode === 'daysAt' ? { offsetDays: stepForm.offsetDays, sendTime: stepForm.sendTime } : {}),
         messageType: stepForm.messageType,
         messageContent: stepForm.messageContent,
       })
       if (res.success) {
         setShowStepForm(false)
-        setStepForm({ offsetMinutes: -60, messageType: 'text', messageContent: '' })
+        setStepForm(emptyStepForm)
         loadDetail(expandedId)
       } else {
         setStepFormError(res.error)
@@ -439,7 +463,7 @@ export default function RemindersPage() {
                                   <div className="flex-1 min-w-0">
                                     <div className="flex items-center gap-2 mb-1">
                                       <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-700">
-                                        {formatOffset(step.offsetMinutes)}
+                                        {formatStepTiming(step)}
                                       </span>
                                       <span className="text-xs text-gray-400">
                                         {messageTypeLabels[step.messageType] ?? step.messageType}
@@ -468,19 +492,49 @@ export default function RemindersPage() {
                           <div className="mt-4 bg-white border border-gray-200 rounded-lg p-4">
                             <h5 className="text-xs font-semibold text-gray-700 mb-3">ステップを追加</h5>
                             <div className="space-y-3 max-w-lg">
-                              <div>
-                                <label className="block text-xs font-medium text-gray-600 mb-1">オフセット (分)</label>
-                                <Input
-                                  label="オフセット (分)"
-                                  type="number"
-                                  placeholder="例: -60 (1時間前), +30 (30分後)"
-                                  value={stepForm.offsetMinutes}
-                                  onChange={(e) => setStepForm({ ...stepForm, offsetMinutes: Number(e.target.value) })}
-                                />
-                                <p className="text-xs text-gray-400 mt-1">
-                                  現在の値: {formatOffset(stepForm.offsetMinutes)}
-                                </p>
-                              </div>
+                              <Select
+                                label="送る時刻の決め方"
+                                value={stepForm.timingMode}
+                                onValueChange={(value) => setStepForm({ ...stepForm, timingMode: value === 'daysAt' ? 'daysAt' : 'minutes' })}
+                                items={{ minutes: '基準時刻から何分', daysAt: 'N日前の決まった時刻（日本時間）' }}
+                              />
+                              {stepForm.timingMode === 'minutes' ? (
+                                <div>
+                                  <label className="block text-xs font-medium text-gray-600 mb-1">オフセット (分)</label>
+                                  <Input
+                                    label="オフセット (分)"
+                                    type="number"
+                                    placeholder="例: -60 (1時間前), +30 (30分後)"
+                                    value={stepForm.offsetMinutes}
+                                    onChange={(e) => setStepForm({ ...stepForm, offsetMinutes: Number(e.target.value) })}
+                                  />
+                                  <p className="text-xs text-gray-400 mt-1">
+                                    現在の値: {formatOffset(stepForm.offsetMinutes)}
+                                  </p>
+                                </div>
+                              ) : (
+                                <div className="flex gap-3">
+                                  <Input
+                                    label="何日前（0 = 当日）"
+                                    type="number"
+                                    min={0}
+                                    value={stepForm.offsetDays}
+                                    onChange={(e) => setStepForm({ ...stepForm, offsetDays: Math.max(0, Number(e.target.value) || 0) })}
+                                  />
+                                  <Input
+                                    label="時刻（日本時間）"
+                                    type="time"
+                                    value={stepForm.sendTime}
+                                    onChange={(e) => setStepForm({ ...stepForm, sendTime: e.target.value })}
+                                  />
+                                  <p className="text-xs text-gray-400 self-end">
+                                    {formatStepTiming({ offsetMinutes: 0, offsetDays: stepForm.offsetDays, sendTime: stepForm.sendTime })}
+                                  </p>
+                                </div>
+                              )}
+                              <p className="text-xs text-gray-400">
+                                本文には {'{{name}}'} や {'{{metadata.予約日}}'} などの差し込みが使えます。
+                              </p>
                               <MessageComposer messageType={stepForm.messageType} messageContent={stepForm.messageContent} onChange={message => setStepForm(previous => ({ ...previous, ...message }))} />
 
                               {stepFormError && <Banner size="sm" variant="error" title="追加できませんでした" description={stepFormError} />}

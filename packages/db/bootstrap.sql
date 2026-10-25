@@ -142,6 +142,33 @@ CREATE TABLE IF NOT EXISTS automations (
   updated_at  TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%f', 'now', '+9 hours'))
 , line_account_id TEXT);
 
+CREATE TABLE IF NOT EXISTS booking_admin_notifications (
+  id                TEXT PRIMARY KEY,
+  line_account_id   TEXT NOT NULL,
+  event             TEXT NOT NULL CHECK (event IN ('requested','approved','rejected','expired','cancelled','ended')),
+  channel           TEXT NOT NULL CHECK (channel IN ('chatwork','webhook')),
+  target            TEXT NOT NULL,
+  message_template  TEXT NOT NULL,
+  minutes_after     INTEGER NOT NULL DEFAULT 30,
+  is_active         INTEGER NOT NULL DEFAULT 1,
+  created_at        TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%f', 'now', '+9 hours')),
+  updated_at        TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%f', 'now', '+9 hours'))
+);
+
+CREATE TABLE IF NOT EXISTS booking_event_marks (
+  booking_id  TEXT NOT NULL,
+  mark        TEXT NOT NULL,
+  created_at  TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%f', 'now', '+9 hours')),
+  PRIMARY KEY (booking_id, mark)
+);
+
+CREATE TABLE IF NOT EXISTS booking_friend_reminders (
+  booking_id          TEXT NOT NULL,
+  friend_reminder_id  TEXT NOT NULL,
+  created_at          TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%f', 'now', '+9 hours')),
+  PRIMARY KEY (booking_id, friend_reminder_id)
+);
+
 CREATE TABLE IF NOT EXISTS booking_idempotency_keys (
   key              TEXT PRIMARY KEY,
   line_account_id  TEXT NOT NULL,
@@ -150,6 +177,13 @@ CREATE TABLE IF NOT EXISTS booking_idempotency_keys (
   response_body    TEXT NOT NULL,
   created_at       TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%f', 'now', '+9 hours')),
   expires_at       TEXT NOT NULL                  -- UTC ISO8601
+);
+
+CREATE TABLE IF NOT EXISTS booking_menu_reminders (
+  menu_id      TEXT NOT NULL,
+  reminder_id  TEXT NOT NULL,
+  created_at   TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%f', 'now', '+9 hours')),
+  PRIMARY KEY (menu_id, reminder_id)
 );
 
 CREATE TABLE IF NOT EXISTS booking_reminders (
@@ -777,7 +811,7 @@ CREATE TABLE IF NOT EXISTS reminder_steps (
   message_type    TEXT NOT NULL CHECK (message_type IN ('text', 'image', 'flex')),
   message_content TEXT NOT NULL,
   created_at      TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%f', 'now', '+9 hours'))
-);
+, offset_days INTEGER, send_time TEXT);
 
 CREATE TABLE IF NOT EXISTS reminders (
   id          TEXT PRIMARY KEY,
@@ -1180,6 +1214,9 @@ CREATE INDEX IF NOT EXISTS idx_automation_logs_automation ON automation_logs (au
 CREATE INDEX IF NOT EXISTS idx_automations_active ON automations (is_active);
 
 CREATE INDEX IF NOT EXISTS idx_automations_event ON automations (event_type);
+
+CREATE INDEX IF NOT EXISTS idx_booking_admin_notifications_account_event
+  ON booking_admin_notifications (line_account_id, event, is_active);
 
 CREATE INDEX IF NOT EXISTS idx_bookings_account_status_starts ON bookings (line_account_id, status, starts_at);
 

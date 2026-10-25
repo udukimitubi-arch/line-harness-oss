@@ -228,8 +228,18 @@ function matchConditions(
   payload: EventPayload,
   eventType: string,
 ): boolean {
+  // 予約の「終了後」: 終了から何分後のルールか（既定30分）。条件が空でも見る。
+  if (eventType === 'booking_ended') {
+    const want = conditions.minutes_after === undefined ? 30 : Number(conditions.minutes_after);
+    if (payload.eventData?.minutesAfter !== want) return false;
+  }
+
   // 条件が空 → 常にマッチ
   if (Object.keys(conditions).length === 0) return true;
+
+  // 予約のきっかけ: メニュー・担当者で絞る
+  if (conditions.menu_id !== undefined && payload.eventData?.menuId !== conditions.menu_id) return false;
+  if (conditions.staff_id !== undefined && payload.eventData?.staffId !== conditions.staff_id) return false;
 
   // score_threshold チェック
   if (conditions.score_threshold !== undefined && payload.eventData) {

@@ -21,6 +21,7 @@ import CcPromptButton from '@/components/cc-prompt-button'
 import { summarizeAutomationActions } from './automation-action-summary'
 
 type AutomationEventType = 'friend_add' | 'tag_change' | 'score_threshold' | 'cv_fire' | 'message_received' | 'postback_received' | 'calendar_booked'
+  | 'booking_requested' | 'booking_approved' | 'booking_rejected' | 'booking_expired' | 'booking_cancelled' | 'booking_ended'
 
 interface AutomationAction {
   type: 'add_tag' | 'remove_tag' | 'start_scenario' | 'send_message' | 'send_webhook' | 'switch_rich_menu'
@@ -48,8 +49,16 @@ const eventTypeOptions: { value: AutomationEventType; label: string }[] = [
   { value: 'cv_fire', label: 'CV発火' },
   { value: 'message_received', label: 'メッセージ受信' },
   { value: 'postback_received', label: 'ポストバック受信（リッチメニュー等）' },
-  { value: 'calendar_booked', label: 'カレンダー予約' },
+  { value: 'calendar_booked', label: 'カレンダー予約（予約の承認と同じ）' },
+  { value: 'booking_requested', label: '予約：申し込み' },
+  { value: 'booking_approved', label: '予約：承認' },
+  { value: 'booking_rejected', label: '予約：却下' },
+  { value: 'booking_expired', label: '予約：期限切れ' },
+  { value: 'booking_cancelled', label: '予約：キャンセル' },
+  { value: 'booking_ended', label: '予約：終了後' },
 ]
+
+const isBookingEvent = (eventType: AutomationEventType) => eventType.startsWith('booking_') || eventType === 'calendar_booked'
 
 const eventTypeLabelMap = Object.fromEntries(eventTypeOptions.map((option) => [option.value, option.label])) as Record<AutomationEventType, string>
 
@@ -61,6 +70,12 @@ const eventTypeBadgeVariant: Record<AutomationEventType, BadgeVariant> = {
   message_received: 'purple',
   postback_received: 'teal',
   calendar_booked: 'blue',
+  booking_requested: 'blue',
+  booking_approved: 'blue',
+  booking_rejected: 'blue',
+  booking_expired: 'blue',
+  booking_cancelled: 'blue',
+  booking_ended: 'blue',
 }
 
 interface CreateFormState {
@@ -353,6 +368,11 @@ export default function AutomationsPage() {
               rows={3}
               value={form.conditionsJson}
               onValueChange={(value) => setForm({ ...form, conditionsJson: value })}
+              description={isBookingEvent(form.eventType)
+                ? form.eventType === 'booking_ended'
+                  ? '例: {"minutes_after": 30, "menu_id": "メニューID", "staff_id": "担当者ID"}。minutes_after は終了から何分後に動かすか（省略すると30分）。'
+                  : '例: {"menu_id": "メニューID", "staff_id": "担当者ID"}。省略するとすべての予約で動きます。'
+                : undefined}
             />
             <Input
               label="優先度"
