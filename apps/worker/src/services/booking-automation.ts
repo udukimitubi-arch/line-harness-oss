@@ -10,9 +10,19 @@
 
 import { enrollFriendInReminder, cancelFriendReminder, reminderStepDueAt } from '@line-crm/db';
 import { fireEvent } from './event-bus.js';
+import { loadBookingRules } from './booking-rules.js';
 
-export type BookingEvent = 'requested' | 'approved' | 'rejected' | 'expired' | 'cancelled' | 'ended';
+export type BookingEvent =
+  | 'requested'
+  | 'approved'
+  | 'rejected'
+  | 'expired'
+  | 'cancelled'
+  | 'ended'
+  | 'attended'
+  | 'no_show';
 
+/** 管理者通知に使えるきっかけ（booking_admin_notifications.event の CHECK と同じ）。 */
 export const BOOKING_EVENTS: readonly BookingEvent[] = [
   'requested',
   'approved',
@@ -30,6 +40,8 @@ export const BOOKING_EVENT_TYPES: Record<BookingEvent, string> = {
   expired: 'booking_expired',
   cancelled: 'booking_cancelled',
   ended: 'booking_ended',
+  attended: 'booking_attended',
+  no_show: 'booking_no_show',
 };
 
 export const BOOKING_EVENT_LABELS: Record<BookingEvent, string> = {
@@ -39,6 +51,8 @@ export const BOOKING_EVENT_LABELS: Record<BookingEvent, string> = {
   expired: '期限切れ',
   cancelled: 'キャンセル',
   ended: '終了後',
+  attended: '来た',
+  no_show: '来なかった',
 };
 
 /** 「終了後」のきっかけの既定（終了時刻から何分後か）。 */
@@ -66,8 +80,8 @@ const STATUS_LABELS: Record<string, string> = {
   rejected: '却下',
   expired: '期限切れ',
   cancelled: 'キャンセル',
-  completed: '終了',
-  no_show: '終了',
+  completed: '来た',
+  no_show: '来なかった',
 };
 
 const JST_OFFSET_MS = 9 * 3600_000;
@@ -191,10 +205,17 @@ export async function syncBookingMetadata(
     .first<{ starts_at: string }>();
 
   // 別の有効な予約が残っているなら、その予約を見せる（終わった予約で上書きしない）。
-  const shown = active ?? booking;
+  const rules = await loadBookingRules(db, booking.line_account_id);
+  const picked = active ?? booking;
+  // 「名前を出さない」設定なら、お客さん向けの差し込みにも出さない。
+  const shown = {
+    ...picked,
+    menu_name: rules.showMenuName ? picked.menu_name : '',
+    staff_name: rules.showStaffName ? picked.staff_name : '',
+  };
   const statusLabel = active
     ? STATUS_LABELS[active.status] ?? active.status
-    : event === 'ended'
+    : event === 'ended' && booking.status === 'confirmed'
       ? '終了'
       : STATUS_LABELS[booking.status] ?? booking.status;
   const values = buildBookingMetadata({

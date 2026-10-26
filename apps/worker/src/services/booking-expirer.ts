@@ -2,6 +2,7 @@
 // The wait is REQUEST_TTL_HOURS (24h) unless the account sets
 // booking_request_ttl_hours (0 = wait until the booking's start time).
 
+import { loadBookingRules } from './booking-rules.js';
 import type { BookingNotificationSender } from './booking-notifier.js';
 import { purgeExpiredIdempotency } from './booking-idempotency.js';
 import { REQUEST_TTL_HOURS } from './booking-types.js';
@@ -91,13 +92,15 @@ export async function runExpirer(
       .bind(row.id)
       .run();
     try {
+      // 「名前を出さない」設定なら、お客さんへの通知にも出さない（services/booking-rules.ts）。
+      const rules = await loadBookingRules(db, row.line_account_id);
       await params.sender({
         channelAccessToken: row.channel_access_token,
         toLineUserId: row.line_user_id,
         kind: 'expired',
         ctx: {
-          menuName: row.menu_name,
-          staffName: row.staff_name,
+          menuName: rules.showMenuName ? row.menu_name : '',
+          staffName: rules.showStaffName ? row.staff_name : '',
           startsAtJst: startsAtJst(row.starts_at),
           hoursBefore: 0,
         },

@@ -237,6 +237,8 @@ function Modal({
   const [remindersLoaded, setRemindersLoaded] = useState(false)
   // 承認したときに Google Meet を付けるか（既存メニューだけ設定できる）
   const [addGoogleMeet, setAddGoogleMeet] = useState(false)
+  // 1人が同時に持てる予約の数（空欄 = 上限なし）
+  const [maxActive, setMaxActive] = useState('')
   const [optionsLoaded, setOptionsLoaded] = useState(false)
 
   useEffect(() => {
@@ -253,6 +255,7 @@ function Modal({
         setReminderIds(linked.reminder_ids)
         setRemindersLoaded(true)
         setAddGoogleMeet(options.add_google_meet)
+        setMaxActive(options.max_active_per_friend == null ? '' : String(options.max_active_per_friend))
         setOptionsLoaded(true)
       })
       .catch(() => {
@@ -275,7 +278,11 @@ function Modal({
         await bookingApi.setMenuReminders(accountId, form.id, reminderIds)
       }
       if (accountId && form.id && optionsLoaded) {
-        await bookingApi.setMenuOptions(accountId, form.id, { add_google_meet: addGoogleMeet })
+        const limit = maxActive.trim() === '' ? null : Number(maxActive)
+        if (limit !== null && (!Number.isInteger(limit) || limit < 1 || limit > 100)) {
+          throw new Error('予約の数の上限は 1〜100 の数字で入れてください（上限なしは空欄）')
+        }
+        await bookingApi.setMenuOptions(accountId, form.id, { add_google_meet: addGoogleMeet, max_active_per_friend: limit })
       }
       await onSave(form)
     } catch (e) {
@@ -359,6 +366,20 @@ function Modal({
               />
               <p className="mt-1 text-xs text-gray-500">
                 担当者の Google カレンダーにできる予定に Meet を付けます。URL は承認の通知の {'{meet_url}'}、友だち情報の「予約URL」で使えます。担当者が Google カレンダーと連携していないと付きません。
+              </p>
+            </div>
+          ) : null}
+          {form.id ? (
+            <div>
+              <Input
+                label="1人が同時に持てる予約の数（空欄 = 上限なし）"
+                type="number"
+                min={1}
+                value={maxActive}
+                onChange={(e) => setMaxActive(e.target.value)}
+              />
+              <p className="mt-1 text-xs text-gray-500">
+                申し込み中と確定で、まだ終わっていない予約を数えます。上限に達したお客さんには、予約画面で知らせます。
               </p>
             </div>
           ) : null}

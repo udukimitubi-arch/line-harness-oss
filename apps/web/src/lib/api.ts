@@ -1767,6 +1767,19 @@ export interface BookingGoogleCalendarConnection {
   last_error: string | null;
 }
 
+/** 予約の決まり（apps/worker/src/services/booking-rules.ts と同じ形）。 */
+export interface BookingRules {
+  menuSelect: boolean
+  fixedMenuId: string | null
+  showMenuName: boolean
+  staffSelect: boolean
+  showStaffName: boolean
+  minLeadMinutes: number
+  cutoffPrevDayTime: string | null
+  maxDaysAhead: number | null
+  closedOnHolidays: boolean
+}
+
 function withAccount(path: string, accountId: string): string {
   return `${path}${path.includes('?') ? '&' : '?'}account_id=${encodeURIComponent(accountId)}`;
 }
@@ -1793,9 +1806,9 @@ export const bookingApi = {
   getMenuReminders: (accountId: string, menuId: string) =>
     fetchApi<{ reminder_ids: string[] }>(withAccount(`/api/booking/admin/menus/${menuId}/reminders`, accountId)),
   getMenuOptions: (accountId: string, menuId: string) =>
-    fetchApi<{ add_google_meet: boolean }>(withAccount(`/api/booking/admin/menus/${menuId}/options`, accountId)),
-  setMenuOptions: (accountId: string, menuId: string, body: { add_google_meet: boolean }) =>
-    fetchApi<{ add_google_meet: boolean }>(withAccount(`/api/booking/admin/menus/${menuId}/options`, accountId), {
+    fetchApi<{ add_google_meet: boolean; max_active_per_friend: number | null }>(withAccount(`/api/booking/admin/menus/${menuId}/options`, accountId)),
+  setMenuOptions: (accountId: string, menuId: string, body: { add_google_meet?: boolean; max_active_per_friend?: number | null }) =>
+    fetchApi<{ add_google_meet: boolean; max_active_per_friend: number | null }>(withAccount(`/api/booking/admin/menus/${menuId}/options`, accountId), {
       method: 'PUT',
       body: JSON.stringify(body),
     }),
@@ -1803,6 +1816,22 @@ export const bookingApi = {
     fetchApi<{ reminder_ids: string[] }>(withAccount(`/api/booking/admin/menus/${menuId}/reminders`, accountId), {
       method: 'PUT',
       body: JSON.stringify({ reminder_ids: reminderIds }),
+    }),
+  // 予約の決まり（表示・受付の締切・何日先まで・祝日）
+  getBookingSettings: (accountId: string) =>
+    fetchApi<{ settings: BookingRules }>(withAccount('/api/booking/admin/booking-settings', accountId)),
+  setBookingSettings: (accountId: string, body: Partial<BookingRules>) =>
+    fetchApi<{ settings: BookingRules }>(withAccount('/api/booking/admin/booking-settings', accountId), {
+      method: 'PUT',
+      body: JSON.stringify(body),
+    }),
+  // 担当者の自動割り振りの優先度
+  getStaffPriority: (accountId: string, staffId: string) =>
+    fetchApi<{ priority: number }>(withAccount(`/api/booking/admin/staff/${staffId}/priority`, accountId)),
+  setStaffPriority: (accountId: string, staffId: string, priority: number) =>
+    fetchApi<{ priority: number }>(withAccount(`/api/booking/admin/staff/${staffId}/priority`, accountId), {
+      method: 'PUT',
+      body: JSON.stringify({ priority }),
     }),
   // Staff
   listStaff: (accountId: string) =>

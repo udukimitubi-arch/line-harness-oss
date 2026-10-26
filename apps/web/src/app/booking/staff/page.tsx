@@ -179,7 +179,7 @@ export default function BookingStaffPage() {
         </LayerCard>
       )}
 
-      {editing && <Modal staff={editing} onSave={save} onClose={() => setEditing(null)} />}
+      {editing && <Modal accountId={selectedAccountId} staff={editing} onSave={save} onClose={() => setEditing(null)} />}
       <Dialog.Root role="alertdialog" open={deleteTarget !== null} onOpenChange={(open) => { if (!open) setDeleteTarget(null) }}>
         <Dialog><Dialog.Title>スタッフを削除しますか？</Dialog.Title><Dialog.Description className="mt-2">「{deleteTarget?.display_name}」を削除します。既存予約は維持されます。</Dialog.Description><div className="mt-6 flex justify-end gap-2"><Button type="button" variant="secondary" onClick={() => setDeleteTarget(null)}>キャンセル</Button><Button type="button" variant="destructive" onClick={remove}>削除</Button></div></Dialog>
       </Dialog.Root>
@@ -189,16 +189,39 @@ export default function BookingStaffPage() {
 
 function Modal({
   staff,
+  accountId,
   onSave,
   onClose,
 }: {
   staff: Partial<BookingStaff>
+  accountId: string | null
   onSave: (s: Partial<BookingStaff>) => Promise<void>
   onClose: () => void
 }) {
   const [form, setForm] = useState<Partial<BookingStaff>>(staff)
   const [saving, setSaving] = useState(false)
   const [err, setErr] = useState<string | null>(null)
+  // 担当者を選ばせない設定のとき、空いている人のうち優先度が大きい人から割り振る
+  const [priority, setPriority] = useState('0')
+  const [priorityLoaded, setPriorityLoaded] = useState(false)
+
+  useEffect(() => {
+    if (!accountId || !staff.id) return
+    let cancelled = false
+    bookingApi
+      .getStaffPriority(accountId, staff.id)
+      .then((r) => {
+        if (cancelled) return
+        setPriority(String(r.priority))
+        setPriorityLoaded(true)
+      })
+      .catch(() => {
+        // 読めなくても編集は続けられる
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [accountId, staff.id])
 
   function set<K extends keyof BookingStaff>(k: K, v: BookingStaff[K]) {
     setForm((prev) => ({ ...prev, [k]: v }))
@@ -208,6 +231,11 @@ function Modal({
     setSaving(true)
     setErr(null)
     try {
+      if (accountId && form.id && priorityLoaded) {
+        const value = Number(priority)
+        if (!Number.isInteger(value)) throw new Error('優先度は整数で入れてください')
+        await bookingApi.setStaffPriority(accountId, form.id, value)
+      }
       await onSave(form)
     } catch (e) {
       setErr(e instanceof Error ? e.message : String(e))
@@ -263,6 +291,20 @@ function Modal({
               onChange={(e) => set('sort_order', Number(e.target.value))}
               className="tabular-nums"
             />
+          {form.id ? (
+            <div>
+              <Input
+                label="自動割り振りの優先度（大きいほど先）"
+                type="number"
+                value={priority}
+                onChange={(e) => setPriority(e.target.value)}
+                className="tabular-nums"
+              />
+              <p className="mt-1 text-xs text-gray-500">
+                「予約の設定」で担当者を選ばせないとき、その時間に空いている人のうち、この数字が大きい人に割り振ります。
+              </p>
+            </div>
+          ) : null}
           <Checkbox
               label="「指名なし」枠（仮想スタッフ）"
               checked={Boolean(form.is_designation_optional)}
