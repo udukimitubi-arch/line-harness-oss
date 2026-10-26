@@ -235,16 +235,25 @@ function Modal({
   const [reminderOptions, setReminderOptions] = useState<Array<{ id: string; name: string }>>([])
   const [reminderIds, setReminderIds] = useState<string[]>([])
   const [remindersLoaded, setRemindersLoaded] = useState(false)
+  // 承認したときに Google Meet を付けるか（既存メニューだけ設定できる）
+  const [addGoogleMeet, setAddGoogleMeet] = useState(false)
+  const [optionsLoaded, setOptionsLoaded] = useState(false)
 
   useEffect(() => {
     if (!accountId || !menu.id) return
     let cancelled = false
-    Promise.all([api.reminders.list({ accountId }), bookingApi.getMenuReminders(accountId, menu.id)])
-      .then(([list, linked]) => {
+    Promise.all([
+      api.reminders.list({ accountId }),
+      bookingApi.getMenuReminders(accountId, menu.id),
+      bookingApi.getMenuOptions(accountId, menu.id),
+    ])
+      .then(([list, linked, options]) => {
         if (cancelled) return
         if (list.success) setReminderOptions(list.data.map((r) => ({ id: r.id, name: r.name })))
         setReminderIds(linked.reminder_ids)
         setRemindersLoaded(true)
+        setAddGoogleMeet(options.add_google_meet)
+        setOptionsLoaded(true)
       })
       .catch(() => {
         // 読めなくてもメニュー編集は続けられる
@@ -264,6 +273,9 @@ function Modal({
     try {
       if (accountId && form.id && remindersLoaded) {
         await bookingApi.setMenuReminders(accountId, form.id, reminderIds)
+      }
+      if (accountId && form.id && optionsLoaded) {
+        await bookingApi.setMenuOptions(accountId, form.id, { add_google_meet: addGoogleMeet })
       }
       await onSave(form)
     } catch (e) {
@@ -338,6 +350,18 @@ function Modal({
               このメニューが予約されると、申込者の友だちに自動でこのタグが付きます。タグは既存のものから選択してください (友だち画面 / シナリオ等で使われているタグ)。
             </p>
           </div>
+          {form.id ? (
+            <div>
+              <Checkbox
+                label="承認したら Google Meet を自動で付ける"
+                checked={addGoogleMeet}
+                onCheckedChange={(checked) => setAddGoogleMeet(Boolean(checked))}
+              />
+              <p className="mt-1 text-xs text-gray-500">
+                担当者の Google カレンダーにできる予定に Meet を付けます。URL は承認の通知の {'{meet_url}'}、友だち情報の「予約URL」で使えます。担当者が Google カレンダーと連携していないと付きません。
+              </p>
+            </div>
+          ) : null}
           <div>
             <p className="text-sm font-medium text-gray-700">承認したときに登録するリマインダー</p>
             {!form.id ? (

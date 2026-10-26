@@ -58,7 +58,8 @@ export function applyNotificationTemplate(template: string, ctx: NotificationCon
     .replaceAll('{menu}', ctx.menuName)
     .replaceAll('{staff}', ctx.staffName)
     .replaceAll('{datetime}', ctx.startsAtJst)
-    .replaceAll('{hours}', String(ctx.hoursBefore));
+    .replaceAll('{hours}', String(ctx.hoursBefore))
+    .replaceAll('{meet_url}', ctx.meetUrl ?? '');
 }
 
 export async function loadNotificationTexts(

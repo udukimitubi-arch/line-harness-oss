@@ -2,6 +2,8 @@
 //
 // - メニューごとに、承認時に登録するリマインダー
 //   GET/PUT /api/booking/admin/menus/:id/reminders
+// - メニューごとの設定（承認時に Google Meet を付けるか）
+//   GET/PUT /api/booking/admin/menus/:id/options
 // - 予約のきっかけごとの管理者通知（チャットワーク / Webhook）
 //   GET/POST /api/booking/admin/notify-targets
 //   PUT/DELETE /api/booking/admin/notify-targets/:id
@@ -128,6 +130,45 @@ bookingAutomation.put('/api/booking/admin/menus/:id/reminders', async (c) => {
 });
 
 // ---------------------------------------------------------------
+// メニューの設定（承認時に Google Meet を付ける）
+
+bookingAutomation.get('/api/booking/admin/menus/:id/options', async (c) => {
+  const accountId = c.req.query('account_id');
+  if (!accountId) return c.json({ error: 'missing_account_id' }, 400);
+  const menu = await c.env.DB
+    .prepare(`SELECT id FROM menus WHERE id = ? AND line_account_id = ? AND deleted_at IS NULL`)
+    .bind(c.req.param('id'), accountId)
+    .first<{ id: string }>();
+  if (!menu) return c.json({ error: 'not_found' }, 404);
+  const row = await c.env.DB
+    .prepare(`SELECT add_google_meet FROM booking_menu_options WHERE menu_id = ?`)
+    .bind(menu.id)
+    .first<{ add_google_meet: number }>();
+  return c.json({ add_google_meet: row?.add_google_meet === 1 });
+});
+
+bookingAutomation.put('/api/booking/admin/menus/:id/options', async (c) => {
+  const accountId = c.req.query('account_id');
+  if (!accountId) return c.json({ error: 'missing_account_id' }, 400);
+  const body = await c.req.json<{ add_google_meet?: unknown }>().catch(() => ({ add_google_meet: undefined }));
+  if (typeof body.add_google_meet !== 'boolean') return c.json({ error: 'add_google_meet must be a boolean' }, 400);
+  const menu = await c.env.DB
+    .prepare(`SELECT id FROM menus WHERE id = ? AND line_account_id = ? AND deleted_at IS NULL`)
+    .bind(c.req.param('id'), accountId)
+    .first<{ id: string }>();
+  if (!menu) return c.json({ error: 'not_found' }, 404);
+  await c.env.DB
+    .prepare(
+      `INSERT INTO booking_menu_options (menu_id, add_google_meet) VALUES (?, ?)
+       ON CONFLICT(menu_id) DO UPDATE SET add_google_meet = excluded.add_google_meet,
+         updated_at = strftime('%Y-%m-%dT%H:%M:%f', 'now', '+9 hours')`,
+    )
+    .bind(menu.id, body.add_google_meet ? 1 : 0)
+    .run();
+  return c.json({ add_google_meet: body.add_google_meet });
+});
+
+// ---------------------------------------------------------------
 // 管理者通知
 
 bookingAutomation.get('/api/booking/admin/notify-targets', async (c) => {
@@ -233,6 +274,7 @@ bookingAutomation.post('/api/booking/admin/notify-targets/:id/test', async (c) =
     starts_at: start.toISOString(),
     ends_at: new Date(start.getTime() + 3600_000).toISOString(),
     menu_name: '（テスト）メニュー',
+    meet_url: 'https://meet.google.com/xxx-xxxx-xxx',
     staff_name: '（テスト）担当者',
     friend_name: '（テスト）お客さま',
     customer_note: '（テスト送信です）',

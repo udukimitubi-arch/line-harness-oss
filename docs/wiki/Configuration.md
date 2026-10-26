@@ -150,14 +150,17 @@ curl -X PUT "$W/api/booking/admin/notification-settings?account_id=$A" \
 | 予約状態 | 申し込み中／確定／却下／期限切れ／キャンセル／終了 |
 | 予約の有無 | あり／なし（まだ終わっていない申し込み中か確定の予約があれば「あり」） |
 | 最終予約日 | 最後に確定した予約の日付 |
+| 予約URL | 承認時に付けた Google Meet の URL（付けていなければ空） |
 
 入るのは1件だけです。まだ終わっていない予約が複数あるときは、一番早い予約を書きます。
 
 **リマインダーへの自動登録**：管理画面「予約 → メニュー → 編集」で、承認したときに登録するリマインダーを選べます（API: `GET/PUT /api/booking/admin/menus/:id/reminders`）。予約の開始時刻を基準に登録し、キャンセル・却下・期限切れで外します。承認が遅れて送る時刻を過ぎたステップは送りません。リマインダーのステップは「基準時刻から何分」のほか、「N日前の HH:MM（日本時間）」でも作れます。
 
+**Google Meet を自動で付ける**：管理画面「予約 → メニュー → 編集」の「承認したら Google Meet を自動で付ける」をオンにすると（API: `GET/PUT /api/booking/admin/menus/:id/options`）、承認したとき担当者の Google カレンダーの予定に Meet を付けます。URL は承認の通知文の `{meet_url}`、友だち情報の `予約URL`、管理者通知の `{meet_url}` で使えます。担当者が Google カレンダーと連携していないと付きません。
+
 **自動ルールのきっかけ**：`booking_requested` / `booking_approved` / `booking_rejected` / `booking_expired` / `booking_cancelled` / `booking_ended`。条件に `{"menu_id": "...", "staff_id": "..."}` を書くと絞れます。`booking_ended` は `{"minutes_after": 30}` で終了から何分後に動かすかを決めます（省略時30分）。承認のときは `calendar_booked` も動きます。
 
-**管理者への通知**：`/api/booking/admin/notify-targets` で、きっかけごとにチャットワークか Webhook（https）へ送れます。文面の差し込みは `{event}` `{name}` `{date}` `{start}` `{end}` `{datetime}` `{menu}` `{staff}` `{status}` `{note}` `{admin_url}`。`POST /api/booking/admin/notify-targets/:id/test` で見本の予約を1回送れます。チャットワークのトークンは Worker のシークレット `CHATWORK_API_TOKEN` に置きます（`wrangler secret put CHATWORK_API_TOKEN` または Cloudflare の画面で「シークレット」として追加）。自分の投稿も未読になるよう `self_unread=1` を付けて送ります。
+**管理者への通知**：`/api/booking/admin/notify-targets` で、きっかけごとにチャットワークか Webhook（https）へ送れます。文面の差し込みは `{event}` `{name}` `{date}` `{start}` `{end}` `{datetime}` `{menu}` `{staff}` `{status}` `{note}` `{admin_url}` `{meet_url}`。`POST /api/booking/admin/notify-targets/:id/test` で見本の予約を1回送れます。チャットワークのトークンは Worker のシークレット `CHATWORK_API_TOKEN` に置きます（`wrangler secret put CHATWORK_API_TOKEN` または Cloudflare の画面で「シークレット」として追加）。自分の投稿も未読になるよう `self_unread=1` を付けて送ります。
 
 **時間について**：「終了後」と「リマインダー」は cron で拾うため、cron が5分ごとなら最大5分遅れます。6時間より前に終わった予約は「終了後」の対象にしません。お客さんが自分でキャンセルする機能は無いため、「キャンセル」は管理画面でキャンセルしたときに動きます。
 
