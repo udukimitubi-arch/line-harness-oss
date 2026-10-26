@@ -255,6 +255,21 @@ const spec = {
         responses: { '200': { description: 'Saved' } },
       },
     },
+    '/api/booking/admin/menus/{id}/options': {
+      get: {
+        tags: ['Booking'],
+        summary: 'メニューの設定（承認時に Google Meet を付けるか）',
+        parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }, { name: 'account_id', in: 'query', required: true, schema: { type: 'string' } }],
+        responses: { '200': { description: '{ add_google_meet: boolean }' } },
+      },
+      put: {
+        tags: ['Booking'],
+        summary: 'メニューの設定を保存（承認時に Google Meet を付けるか）',
+        parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }, { name: 'account_id', in: 'query', required: true, schema: { type: 'string' } }],
+        requestBody: { content: { 'application/json': { schema: { type: 'object', properties: { add_google_meet: { type: 'boolean' } }, required: ['add_google_meet'] } } } },
+        responses: { '200': { description: 'Saved' } },
+      },
+    },
     '/api/booking/admin/notify-targets': {
       get: {
         tags: ['Booking'],
@@ -266,7 +281,7 @@ const spec = {
         tags: ['Booking'],
         summary: '管理者通知を追加（チャットワーク / Webhook）',
         parameters: [{ name: 'account_id', in: 'query', required: true, schema: { type: 'string' } }],
-        requestBody: { content: { 'application/json': { schema: { type: 'object', properties: { event: { type: 'string', enum: ['requested', 'approved', 'rejected', 'expired', 'cancelled', 'ended'] }, channel: { type: 'string', enum: ['chatwork', 'webhook'] }, target: { type: 'string', description: 'チャットワークのルームID、または Webhook の https URL' }, message_template: { type: 'string', description: '差し込み: {event} {name} {date} {start} {end} {datetime} {menu} {staff} {status} {note} {admin_url}' }, minutes_after: { type: 'integer', description: 'event=ended のとき、終了から何分後に送るか（既定30）' }, is_active: { type: 'boolean' } }, required: ['event', 'channel', 'target', 'message_template'] } } } },
+        requestBody: { content: { 'application/json': { schema: { type: 'object', properties: { event: { type: 'string', enum: ['requested', 'approved', 'rejected', 'expired', 'cancelled', 'ended'] }, channel: { type: 'string', enum: ['chatwork', 'webhook'] }, target: { type: 'string', description: 'チャットワークのルームID、または Webhook の https URL' }, message_template: { type: 'string', description: '差し込み: {event} {name} {date} {start} {end} {datetime} {menu} {staff} {status} {note} {admin_url} {meet_url}' }, minutes_after: { type: 'integer', description: 'event=ended のとき、終了から何分後に送るか（既定30）' }, is_active: { type: 'boolean' } }, required: ['event', 'channel', 'target', 'message_template'] } } } },
         responses: { '201': { description: 'Created' } },
       },
     },
@@ -275,7 +290,7 @@ const spec = {
         tags: ['Booking'],
         summary: '管理者通知を更新',
         parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }, { name: 'account_id', in: 'query', required: true, schema: { type: 'string' } }],
-        requestBody: { content: { 'application/json': { schema: { type: 'object', properties: { event: { type: 'string', enum: ['requested', 'approved', 'rejected', 'expired', 'cancelled', 'ended'] }, channel: { type: 'string', enum: ['chatwork', 'webhook'] }, target: { type: 'string', description: 'チャットワークのルームID、または Webhook の https URL' }, message_template: { type: 'string', description: '差し込み: {event} {name} {date} {start} {end} {datetime} {menu} {staff} {status} {note} {admin_url}' }, minutes_after: { type: 'integer', description: 'event=ended のとき、終了から何分後に送るか（既定30）' }, is_active: { type: 'boolean' } } } } } },
+        requestBody: { content: { 'application/json': { schema: { type: 'object', properties: { event: { type: 'string', enum: ['requested', 'approved', 'rejected', 'expired', 'cancelled', 'ended'] }, channel: { type: 'string', enum: ['chatwork', 'webhook'] }, target: { type: 'string', description: 'チャットワークのルームID、または Webhook の https URL' }, message_template: { type: 'string', description: '差し込み: {event} {name} {date} {start} {end} {datetime} {menu} {staff} {status} {note} {admin_url} {meet_url}' }, minutes_after: { type: 'integer', description: 'event=ended のとき、終了から何分後に送るか（既定30）' }, is_active: { type: 'boolean' } } } } } },
         responses: { '200': { description: 'Updated' } },
       },
       delete: {

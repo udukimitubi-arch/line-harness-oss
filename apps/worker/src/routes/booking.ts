@@ -20,7 +20,6 @@ import { canTransition, nextStatus, type BookingAction } from '../services/booki
 import { getAvailability } from '../services/availability.js';
 import {
   removeBookingFromGoogle,
-  syncConfirmedBookingToGoogle,
   verifyStaffCalendarConnection,
 } from '../services/booking-calendar-sync.js';
 import {
@@ -30,6 +29,7 @@ import {
 import { sendBookingNotification } from '../services/booking-notifier.js';
 import { insertConfirmationReminders } from '../services/booking-confirm.js';
 import { queueBookingEvent } from '../services/booking-automation-hooks.js';
+import { getBookingMeetUrl, syncConfirmedBookingWithMeet } from '../services/booking-meet.js';
 import { attachTagAndFireSideEffects } from '../services/friend-tag-attach.js';
 import {
   DEFAULT_ACCOUNT_SETTINGS,
@@ -297,6 +297,7 @@ async function notifyForBooking(
       staffName: row.staff_name,
       startsAtJst: startsAtJst(row.starts_at),
       hoursBefore: 0,
+      meetUrl: (await getBookingMeetUrl(db, bookingId)) ?? '',
     },
     db,
     lineAccountId: row.line_account_id,
@@ -956,7 +957,7 @@ booking.post('/api/booking/admin/bookings', async (c) => {
   });
   let calendarSync: 'not_configured' | 'synced' | 'failed' = 'not_configured';
   try {
-    const synced = await syncConfirmedBookingToGoogle(
+    const synced = await syncConfirmedBookingWithMeet(
       c.env.DB,
       googleCredentials(c.env),
       bookingId,
@@ -1678,7 +1679,7 @@ booking.patch('/api/booking/admin/requests/:id', async (c) => {
       enabled: isBookingRemindersEnabled(c.env.BOOKING_REMINDERS_ENABLED),
     });
     try {
-      await syncConfirmedBookingToGoogle(c.env.DB, googleCredentials(c.env), id);
+      await syncConfirmedBookingWithMeet(c.env.DB, googleCredentials(c.env), id);
     } catch (error) {
       console.error('Google Calendar sync (approve) failed:', error);
     }

@@ -1792,6 +1792,13 @@ export const bookingApi = {
   // 承認時に自動登録するリマインダー（メニューごと）
   getMenuReminders: (accountId: string, menuId: string) =>
     fetchApi<{ reminder_ids: string[] }>(withAccount(`/api/booking/admin/menus/${menuId}/reminders`, accountId)),
+  getMenuOptions: (accountId: string, menuId: string) =>
+    fetchApi<{ add_google_meet: boolean }>(withAccount(`/api/booking/admin/menus/${menuId}/options`, accountId)),
+  setMenuOptions: (accountId: string, menuId: string, body: { add_google_meet: boolean }) =>
+    fetchApi<{ add_google_meet: boolean }>(withAccount(`/api/booking/admin/menus/${menuId}/options`, accountId), {
+      method: 'PUT',
+      body: JSON.stringify(body),
+    }),
   setMenuReminders: (accountId: string, menuId: string, reminderIds: string[]) =>
     fetchApi<{ reminder_ids: string[] }>(withAccount(`/api/booking/admin/menus/${menuId}/reminders`, accountId), {
       method: 'PUT',

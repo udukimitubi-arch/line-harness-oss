@@ -57,6 +57,7 @@ export const BOOKING_METADATA_KEYS = {
   status: '予約状態',
   active: '予約の有無',
   lastDate: '最終予約日',
+  meetUrl: '予約URL',
 } as const;
 
 const STATUS_LABELS: Record<string, string> = {
@@ -101,6 +102,8 @@ export interface BookingSnapshot {
   staff_name: string;
   friend_name: string | null;
   channel_access_token: string | null;
+  /** 承認時に付けた Google Meet の URL（booking_meet_urls）。無ければ null。 */
+  meet_url: string | null;
 }
 
 export async function loadBookingSnapshot(db: D1Database, bookingId: string): Promise<BookingSnapshot | null> {
@@ -111,12 +114,14 @@ export async function loadBookingSnapshot(db: D1Database, bookingId: string): Pr
               m.name AS menu_name,
               s.display_name AS staff_name,
               f.display_name AS friend_name,
-              la.channel_access_token
+              la.channel_access_token,
+              bmu.meet_url
          FROM bookings b
          INNER JOIN menus m ON m.id = b.menu_id
          INNER JOIN staff s ON s.id = b.staff_id
          INNER JOIN friends f ON f.id = b.friend_id
          LEFT JOIN line_accounts la ON la.id = b.line_account_id
+         LEFT JOIN booking_meet_urls bmu ON bmu.booking_id = b.id
         WHERE b.id = ?`,
     )
     .bind(bookingId)
@@ -132,7 +137,7 @@ export async function loadBookingSnapshot(db: D1Database, bookingId: string): Pr
  * 無ければ今回の予約。予約状態は今回のきっかけ（ended は「終了」）。
  */
 export function buildBookingMetadata(params: {
-  shown: Pick<BookingSnapshot, 'starts_at' | 'ends_at' | 'menu_name' | 'staff_name' | 'status'>;
+  shown: Pick<BookingSnapshot, 'starts_at' | 'ends_at' | 'menu_name' | 'staff_name' | 'status'> & { meet_url?: string | null };
   statusLabel: string;
   hasActive: boolean;
   lastConfirmedStartsAt: string | null;
@@ -147,6 +152,7 @@ export function buildBookingMetadata(params: {
     [BOOKING_METADATA_KEYS.staff]: params.shown.staff_name,
     [BOOKING_METADATA_KEYS.status]: params.statusLabel,
     [BOOKING_METADATA_KEYS.active]: params.hasActive ? 'あり' : 'なし',
+    [BOOKING_METADATA_KEYS.meetUrl]: params.shown.meet_url ?? '',
   };
   if (params.lastConfirmedStartsAt) {
     meta[BOOKING_METADATA_KEYS.lastDate] = formatJstParts(params.lastConfirmedStartsAt).date;
@@ -163,16 +169,18 @@ export async function syncBookingMetadata(
   const nowIso = now.toISOString();
   const active = await db
     .prepare(
-      `SELECT b.starts_at, b.ends_at, b.status, m.name AS menu_name, s.display_name AS staff_name
+      `SELECT b.starts_at, b.ends_at, b.status, m.name AS menu_name, s.display_name AS staff_name,
+              bmu.meet_url
          FROM bookings b
          INNER JOIN menus m ON m.id = b.menu_id
          INNER JOIN staff s ON s.id = b.staff_id
+         LEFT JOIN booking_meet_urls bmu ON bmu.booking_id = b.id
         WHERE b.friend_id = ? AND b.status IN ('requested','confirmed') AND b.ends_at > ?
         ORDER BY b.starts_at ASC
         LIMIT 1`,
     )
     .bind(booking.friend_id, nowIso)
-    .first<Pick<BookingSnapshot, 'starts_at' | 'ends_at' | 'status' | 'menu_name' | 'staff_name'>>();
+    .first<Pick<BookingSnapshot, 'starts_at' | 'ends_at' | 'status' | 'menu_name' | 'staff_name' | 'meet_url'>>();
   const lastConfirmed = await db
     .prepare(
       `SELECT starts_at FROM bookings
@@ -306,7 +314,7 @@ export interface BookingAutomationDeps {
 /** 通知文の差し込み。 */
 export function renderAdminNotification(
   template: string,
-  booking: Pick<BookingSnapshot, 'starts_at' | 'ends_at' | 'menu_name' | 'staff_name' | 'friend_name' | 'customer_note' | 'status'>,
+  booking: Pick<BookingSnapshot, 'starts_at' | 'ends_at' | 'menu_name' | 'staff_name' | 'friend_name' | 'customer_note' | 'status'> & { meet_url?: string | null },
   event: BookingEvent,
   adminPublicUrl?: string,
 ): string {
@@ -325,8 +333,9 @@ export function renderAdminNotification(
     status: STATUS_LABELS[booking.status] ?? booking.status,
     note: booking.customer_note ?? '',
     admin_url: adminUrl,
+    meet_url: booking.meet_url ?? '',
   };
-  return template.replace(/\{(event|name|date|start|end|datetime|menu|staff|status|note|admin_url)\}/g, (_m, key: string) => values[key] ?? '');
+  return template.replace(/\{(event|name|date|start|end|datetime|menu|staff|status|note|admin_url|meet_url)\}/g, (_m, key: string) => values[key] ?? '');
 }
 
 export async function sendAdminNotification(
@@ -398,6 +407,7 @@ function bookingPayload(booking: BookingSnapshot): Record<string, unknown> {
     friendId: booking.friend_id,
     friendName: booking.friend_name,
     customerNote: booking.customer_note,
+    meetUrl: booking.meet_url,
   };
 }
 

@@ -14,6 +14,8 @@ export interface NotificationContext {
   staffName: string;
   startsAtJst: string; // 例: "2026-05-10 14:00"
   hoursBefore: number;
+  /** 承認時に付けた Google Meet の URL（{meet_url}）。無ければ空。 */
+  meetUrl?: string;
 }
 
 export function renderNotificationText(

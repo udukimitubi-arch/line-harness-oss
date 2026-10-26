@@ -72,7 +72,7 @@ describe('buildBookingMetadata', () => {
   it('writes the Japanese keys', () => {
     expect(
       buildBookingMetadata({
-        shown: { starts_at: STARTS, ends_at: ENDS, menu_name: '無料診断', staff_name: '秋元', status: 'confirmed' },
+        shown: { starts_at: STARTS, ends_at: ENDS, menu_name: '無料診断', staff_name: '秋元', status: 'confirmed', meet_url: 'https://meet.google.com/abc-defg-hij' },
         statusLabel: '確定',
         hasActive: true,
         lastConfirmedStartsAt: STARTS,
@@ -85,6 +85,7 @@ describe('buildBookingMetadata', () => {
       予約担当者: '秋元',
       予約状態: '確定',
       予約の有無: 'あり',
+      予約URL: 'https://meet.google.com/abc-defg-hij',
       最終予約日: '10月27日(火)',
     });
   });
@@ -93,12 +94,12 @@ describe('buildBookingMetadata', () => {
 describe('renderAdminNotification', () => {
   it('fills placeholders', () => {
     const text = renderAdminNotification(
-      '【{event}】{name}様 {date} {start}〜{end} {menu}/{staff} {status} メモ:{note} {admin_url}',
-      { starts_at: STARTS, ends_at: ENDS, menu_name: '無料診断', staff_name: '秋元', friend_name: 'テスト太郎', customer_note: 'よろしく', status: 'requested' },
+      '【{event}】{name}様 {date} {start}〜{end} {menu}/{staff} {status} メモ:{note} {admin_url} {meet_url}',
+      { starts_at: STARTS, ends_at: ENDS, menu_name: '無料診断', staff_name: '秋元', friend_name: 'テスト太郎', customer_note: 'よろしく', status: 'requested', meet_url: 'https://meet.google.com/x' },
       'requested',
       'https://admin.example/',
     );
-    expect(text).toBe('【申し込み】テスト太郎様 10月27日(火) 10:00〜11:00 無料診断/秋元 申し込み中 メモ:よろしく https://admin.example/booking/bookings');
+    expect(text).toBe('【申し込み】テスト太郎様 10月27日(火) 10:00〜11:00 無料診断/秋元 申し込み中 メモ:よろしく https://admin.example/booking/bookings https://meet.google.com/x');
   });
 });
 

@@ -61,6 +61,20 @@ describe('menu reminders', () => {
   });
 });
 
+describe('menu options', () => {
+  it('saves and reads the Google Meet option', async () => {
+    const t = setup();
+    let res = await t.call('/api/booking/admin/menus/menu-1/options?account_id=acc');
+    expect(await res.json()).toEqual({ add_google_meet: false });
+    res = await t.call('/api/booking/admin/menus/menu-1/options?account_id=acc', json({ add_google_meet: true }, 'PUT'));
+    expect(res.status).toBe(200);
+    res = await t.call('/api/booking/admin/menus/menu-1/options?account_id=acc');
+    expect(await res.json()).toEqual({ add_google_meet: true });
+    res = await t.call('/api/booking/admin/menus/menu-1/options?account_id=acc', json({ add_google_meet: 'yes' }, 'PUT'));
+    expect(res.status).toBe(400);
+  });
+});
+
 describe('notify targets', () => {
   it('creates, updates, tests and deletes a Chatwork target', async () => {
     const t = setup({ CHATWORK_API_TOKEN: 'synthetic-cw', ADMIN_PUBLIC_URL: 'https://admin.example' });
