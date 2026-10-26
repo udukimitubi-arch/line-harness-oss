@@ -7,11 +7,17 @@ export default function Confirm({
   menu,
   staff,
   slot,
+  showMenuName = true,
+  showStaffName = true,
+  stepLabel = 'step 4 / 4',
   onSubmitted,
   onBack,
 }: {
   menu: MenuItem;
   staff: StaffItem;
+  showMenuName?: boolean;
+  showStaffName?: boolean;
+  stepLabel?: string;
   slot: { date: string; start: string };
   onSubmitted: () => void;
   onBack: () => void;
@@ -29,7 +35,8 @@ export default function Confirm({
       await createApi(ctx).createRequest(
         {
           menu_id: menu.id,
-          staff_id: staff.id,
+          // 空なら「おまかせ」。サーバーが空いている担当者に割り振る。
+          ...(staff.id ? { staff_id: staff.id } : {}),
           starts_at: jstStartsAtIso(slot.date, slot.start),
           customer_note: note || undefined,
         },
@@ -40,6 +47,10 @@ export default function Confirm({
       const err = e as { status?: number; body?: { error?: string } };
       if (err.status === 409 && err.body?.error === 'slot_conflict') {
         setError('この時間枠は他の方の予約と重なりました。日時を選び直してください。');
+      } else if (err.status === 409 && err.body?.error === 'limit_reached') {
+        setError('お申し込みできる予約の数の上限に達しています。今のご予約が終わってから、もう一度お申し込みください。');
+      } else if (err.body?.error === 'slot_not_available' || err.body?.error === 'no_staff_available') {
+        setError('この時間枠は受付が終了しました。日時を選び直してください。');
       } else {
         setError('予約リクエストの送信に失敗しました。時間をおいて再度お試しください。');
       }
@@ -56,12 +67,12 @@ export default function Confirm({
       </button>
       <div>
         <h1 className="text-base font-bold text-gray-900">内容のご確認</h1>
-        <p className="text-xs text-gray-500 mt-1">step 4 / 4</p>
+        <p className="text-xs text-gray-500 mt-1">{stepLabel}</p>
       </div>
       <div className="sb-card">
         <dl className="space-y-3 text-sm">
-          <Row label="メニュー" value={menu.name} />
-          <Row label="担当" value={staff.display_name} />
+          {showMenuName && <Row label="メニュー" value={menu.name} />}
+          {showStaffName && staff.id && <Row label="担当" value={staff.display_name} />}
           <Row label="日時" value={`${formatJp(slot.date)} ${slot.start}`} />
           <Row label="所要" value={`${staff.duration_minutes} 分`} />
           <Row

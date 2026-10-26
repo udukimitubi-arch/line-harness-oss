@@ -831,7 +831,9 @@ export type AutomationEventType =
   | "booking_rejected"
   | "booking_expired"
   | "booking_cancelled"
-  | "booking_ended";
+  | "booking_ended"
+  | "booking_attended"
+  | "booking_no_show";
 
 export interface AutomationAction {
   type: "add_tag" | "remove_tag" | "start_scenario" | "send_message" | "send_webhook" | "switch_rich_menu";

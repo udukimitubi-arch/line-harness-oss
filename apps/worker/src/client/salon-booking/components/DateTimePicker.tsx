@@ -34,10 +34,14 @@ export default function DateTimePicker({
   useEffect(() => {
     setError(null);
     createApi(ctx)
-      .availability(menuId, staffId, from, to)
+      .availability(menuId, staffId || undefined, from, to)
       .then((r) => {
         const staff = r.by_staff[0];
-        const slots = staff?.slots ?? [];
+        // 担当者おまかせ（staffId が空）なら、誰か1人でも空いている枠を全部出す。
+        const slots = staffId
+          ? staff?.slots ?? []
+          : [...new Map(r.by_staff.flatMap((s) => s.slots).map((x) => [`${x.date} ${x.start}`, x])).values()]
+              .sort((a, b) => `${a.date} ${a.start}`.localeCompare(`${b.date} ${b.start}`));
         if (slots.length === 0) {
           const sync = r.calendar_sync?.find((s) => s.staff_id === staff?.staff_id);
           if (sync?.configured && !sync.ok) setEmptyReason('calendar_unavailable');

@@ -65,12 +65,43 @@ describe('menu options', () => {
   it('saves and reads the Google Meet option', async () => {
     const t = setup();
     let res = await t.call('/api/booking/admin/menus/menu-1/options?account_id=acc');
-    expect(await res.json()).toEqual({ add_google_meet: false });
+    expect(await res.json()).toEqual({ add_google_meet: false, max_active_per_friend: null });
     res = await t.call('/api/booking/admin/menus/menu-1/options?account_id=acc', json({ add_google_meet: true }, 'PUT'));
     expect(res.status).toBe(200);
     res = await t.call('/api/booking/admin/menus/menu-1/options?account_id=acc');
-    expect(await res.json()).toEqual({ add_google_meet: true });
+    expect(await res.json()).toEqual({ add_google_meet: true, max_active_per_friend: null });
+    // 上限だけ変えても Meet の設定は残る
+    res = await t.call('/api/booking/admin/menus/menu-1/options?account_id=acc', json({ max_active_per_friend: 2 }, 'PUT'));
+    expect(await res.json()).toEqual({ add_google_meet: true, max_active_per_friend: 2 });
+    res = await t.call('/api/booking/admin/menus/menu-1/options?account_id=acc', json({ max_active_per_friend: 0 }, 'PUT'));
+    expect(res.status).toBe(400);
     res = await t.call('/api/booking/admin/menus/menu-1/options?account_id=acc', json({ add_google_meet: 'yes' }, 'PUT'));
+    expect(res.status).toBe(400);
+  });
+});
+
+describe('booking settings and staff priority', () => {
+  it('saves only what was sent and validates', async () => {
+    const t = setup();
+    let res = await t.call('/api/booking/admin/booking-settings?account_id=acc');
+    expect(((await res.json()) as { settings: { staffSelect: boolean; minLeadMinutes: number } }).settings)
+      .toMatchObject({ staffSelect: true, minLeadMinutes: 60 });
+    res = await t.call('/api/booking/admin/booking-settings?account_id=acc', json({ staffSelect: false, closedOnHolidays: true }, 'PUT'));
+    expect(((await res.json()) as { settings: unknown }).settings).toMatchObject({ staffSelect: false, closedOnHolidays: true, menuSelect: true });
+    res = await t.call('/api/booking/admin/booking-settings?account_id=acc', json({ menuSelect: false, fixedMenuId: 'nope' }, 'PUT'));
+    expect(res.status).toBe(400);
+    res = await t.call('/api/booking/admin/booking-settings?account_id=acc', json({ menuSelect: false, fixedMenuId: 'menu-1' }, 'PUT'));
+    expect(res.status).toBe(200);
+  });
+
+  it('saves the staff priority', async () => {
+    const t = setup();
+    t.sqlite.exec("INSERT INTO staff(id,line_account_id,name,display_name) VALUES('s1','acc','s1','A')");
+    let res = await t.call('/api/booking/admin/staff/s1/priority?account_id=acc', json({ priority: 5 }, 'PUT'));
+    expect(res.status).toBe(200);
+    res = await t.call('/api/booking/admin/staff/s1/priority?account_id=acc');
+    expect(await res.json()).toEqual({ priority: 5 });
+    res = await t.call('/api/booking/admin/staff/s1/priority?account_id=acc', json({ priority: 1.5 }, 'PUT'));
     expect(res.status).toBe(400);
   });
 });

@@ -162,7 +162,24 @@ curl -X PUT "$W/api/booking/admin/notification-settings?account_id=$A" \
 
 **管理者への通知**：`/api/booking/admin/notify-targets` で、きっかけごとにチャットワークか Webhook（https）へ送れます。文面の差し込みは `{event}` `{name}` `{date}` `{start}` `{end}` `{datetime}` `{menu}` `{staff}` `{status}` `{note}` `{admin_url}` `{meet_url}`。`POST /api/booking/admin/notify-targets/:id/test` で見本の予約を1回送れます。チャットワークのトークンは Worker のシークレット `CHATWORK_API_TOKEN` に置きます（`wrangler secret put CHATWORK_API_TOKEN` または Cloudflare の画面で「シークレット」として追加）。自分の投稿も未読になるよう `self_unread=1` を付けて送ります。
 
+**「来た」「来なかった」**：予約一覧で「完了」「無断」を付けると、自動ルールのきっかけ `booking_attended` / `booking_no_show` が動き、友だち情報の予約状態が「来た」「来なかった」になります。
+
 **時間について**：「終了後」と「リマインダー」は cron で拾うため、cron が5分ごとなら最大5分遅れます。6時間より前に終わった予約は「終了後」の対象にしません。お客さんが自分でキャンセルする機能は無いため、「キャンセル」は管理画面でキャンセルしたときに動きます。
+
+### 予約の決まり（表示・自動割り振り・上限・締切・祝日）
+
+管理画面「予約 → 予約の設定」（API: `GET/PUT /api/booking/admin/booking-settings`）で、アカウントごとに決めます。値は `account_settings`（key=`booking_rules`）に入ります。設定しなければ今までと同じ動きです。
+
+| 設定 | 中身 |
+|---|---|
+| メニューを選ばせる | オフにすると、決めたメニューに固定して、メニューの画面を飛ばす |
+| 担当者を選ばせる | オフにすると「おまかせ」。その時間に誰か1人でも空いていれば枠を出し、申し込み時に、空いている人のうち優先度（スタッフの編集画面。`/api/booking/admin/staff/:id/priority`）が大きい人へ割り振る。同じ時間に申し込みが重なったら次の人へ回す |
+| メニュー名・担当者名を出す | オフにすると、確認画面・お客さんへの通知・友だち情報に出さない（管理者通知には出る） |
+| 受付の締切 | 「開始の何分前まで」（既定60分）か「予約日の前日の HH:MM まで」 |
+| 何日先まで | 今日から何日先まで受け付けるか（空欄は制限なし） |
+| 祝日は受け付けない | 日本の祝日（振替休日・国民の休日を含む）を本体で計算して閉じる。その日にシフトを入れた担当者は開く |
+
+メニューごとに「1人が同時に持てる予約の数」も決められます（メニューの編集画面。`/api/booking/admin/menus/:id/options` の `max_active_per_friend`）。申し込み中と確定で、まだ終わっていない予約を数え、上限ならお客さんの画面で知らせます。
 
 ### 管理画面の環境変数
 

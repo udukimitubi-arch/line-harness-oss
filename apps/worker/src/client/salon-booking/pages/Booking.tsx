@@ -5,7 +5,14 @@ import DateTimePicker from '../components/DateTimePicker.js';
 import Confirm from '../components/Confirm.js';
 import Done from '../components/Done.js';
 import { useSalonContext } from '../lib/context.js';
-import { createApi, type MenuItem, type StaffItem } from '../lib/api.js';
+import {
+  autoStaffFor,
+  createApi,
+  DEFAULT_DISPLAY_SETTINGS,
+  type BookingDisplaySettings,
+  type MenuItem,
+  type StaffItem,
+} from '../lib/api.js';
 
 type Step = 'menu' | 'staff' | 'datetime' | 'confirm' | 'done';
 
@@ -34,19 +41,34 @@ export default function Booking({
   // 該当 menu が無効/未公開だった場合は通常フローに fallback（黙って全
   // メニュー一覧を出す方が「初回オリエン直リンク経由なのに別メニュー
   // を選ばれる」事故より安全）。
-  const [deepLinkResolving, setDeepLinkResolving] = useState(Boolean(initialMenuId));
+  const [deepLinkResolving, setDeepLinkResolving] = useState(true);
+  // アカウントの表示の決まり（メニュー・担当者を選ばせるか、名前を出すか）
+  const [display, setDisplay] = useState<BookingDisplaySettings>(DEFAULT_DISPLAY_SETTINGS);
+
+  // メニューが決まったあとの行き先。担当者を選ばせないなら「おまかせ」で日時へ。
+  function afterMenu(m: MenuItem, settings: BookingDisplaySettings) {
+    if (settings.staff_select) {
+      setStep('staff');
+    } else {
+      setStaff(autoStaffFor(m));
+      setStep('datetime');
+    }
+  }
 
   useEffect(() => {
-    if (!initialMenuId) return;
     let cancelled = false;
-    createApi(ctx)
-      .menus()
-      .then((res) => {
+    const api = createApi(ctx);
+    Promise.all([api.settings().catch(() => DEFAULT_DISPLAY_SETTINGS), api.menus()])
+      .then(([settings, res]) => {
         if (cancelled) return;
-        const hit = res.menus.find((m) => m.id === initialMenuId);
+        setDisplay(settings);
+        // メニューを選ばせない設定なら固定メニュー、そうでなければ ?menu_id= の直リンク。
+        const targetId = !settings.menu_select && settings.fixed_menu_id ? settings.fixed_menu_id : initialMenuId;
+        if (!targetId) return;
+        const hit = res.menus.find((m) => m.id === targetId);
         if (hit) {
           setMenu(hit);
-          setStep('staff');
+          afterMenu(hit, settings);
         }
       })
       .catch(() => {
@@ -70,7 +92,11 @@ export default function Booking({
   }
 
   const showStepper = step !== 'done';
-  const stepIdx = STEPS.findIndex((s) => s.key === step);
+  const menuLocked = !display.menu_select && Boolean(display.fixed_menu_id);
+  const steps = STEPS.filter(
+    (st) => !(st.key === 'menu' && menuLocked) && !(st.key === 'staff' && !display.staff_select),
+  );
+  const stepIdx = steps.findIndex((s) => s.key === step);
 
   return (
     <div>
@@ -79,11 +105,11 @@ export default function Booking({
           className="mb-5 px-1"
           style={{
             display: 'grid',
-            gridTemplateColumns: `repeat(${STEPS.length}, minmax(0, 1fr))`,
+            gridTemplateColumns: `repeat(${steps.length}, minmax(0, 1fr))`,
             gap: 0,
           }}
         >
-          {STEPS.map((s, i) => {
+          {steps.map((s, i) => {
             const done = i < stepIdx;
             const active = i === stepIdx;
             const future = i > stepIdx;
@@ -149,7 +175,7 @@ export default function Booking({
               setSlot(null);
             }
             setMenu(m);
-            setStep('staff');
+            afterMenu(m, display);
           }}
         />
       )}
@@ -172,14 +198,14 @@ export default function Booking({
           ctaLabel={
             peekMode
               ? '空き状況の確認モードです（タップで予約に進めます）'
-              : 'step 3 / 4'
+              : `step ${stepIdx + 1} / ${steps.length}`
           }
           selected={slot}
           onSelect={(picked) => {
             setSlot(picked);
             if (!peekMode) setStep('confirm');
           }}
-          onBack={() => setStep('staff')}
+          onBack={() => setStep(display.staff_select ? 'staff' : menuLocked ? 'datetime' : 'menu')}
         />
       )}
       {step === 'datetime' && peekMode && slot && (
@@ -206,6 +232,9 @@ export default function Booking({
           menu={menu}
           staff={staff}
           slot={slot}
+          showMenuName={display.show_menu_name}
+          showStaffName={display.show_staff_name}
+          stepLabel={`step ${steps.length} / ${steps.length}`}
           onSubmitted={() => setStep('done')}
           onBack={() => setStep('datetime')}
         />

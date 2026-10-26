@@ -2,8 +2,12 @@
 //
 // - メニューごとに、承認時に登録するリマインダー
 //   GET/PUT /api/booking/admin/menus/:id/reminders
-// - メニューごとの設定（承認時に Google Meet を付けるか）
+// - メニューごとの設定（承認時に Google Meet を付けるか、1人あたりの予約数の上限）
 //   GET/PUT /api/booking/admin/menus/:id/options
+// - アカウントの予約の決まり（表示・受付の締切・何日先まで・祝日）
+//   GET/PUT /api/booking/admin/booking-settings
+// - 担当者の自動割り振りの優先度
+//   GET/PUT /api/booking/admin/staff/:id/priority
 // - 予約のきっかけごとの管理者通知（チャットワーク / Webhook）
 //   GET/POST /api/booking/admin/notify-targets
 //   PUT/DELETE /api/booking/admin/notify-targets/:id
@@ -22,6 +26,12 @@ import {
   type BookingEvent,
 } from '../services/booking-automation.js';
 import { bookingAutomationDeps } from '../services/booking-automation-hooks.js';
+import {
+  loadBookingRules,
+  saveBookingRules,
+  validateBookingRulesInput,
+  type BookingRules,
+} from '../services/booking-rules.js';
 
 const bookingAutomation = new Hono<Env>();
 
@@ -141,31 +151,132 @@ bookingAutomation.get('/api/booking/admin/menus/:id/options', async (c) => {
     .first<{ id: string }>();
   if (!menu) return c.json({ error: 'not_found' }, 404);
   const row = await c.env.DB
-    .prepare(`SELECT add_google_meet FROM booking_menu_options WHERE menu_id = ?`)
+    .prepare(`SELECT add_google_meet, max_active_per_friend FROM booking_menu_options WHERE menu_id = ?`)
     .bind(menu.id)
-    .first<{ add_google_meet: number }>();
-  return c.json({ add_google_meet: row?.add_google_meet === 1 });
+    .first<{ add_google_meet: number; max_active_per_friend: number | null }>();
+  return c.json({
+    add_google_meet: row?.add_google_meet === 1,
+    max_active_per_friend: row?.max_active_per_friend ?? null,
+  });
 });
 
 bookingAutomation.put('/api/booking/admin/menus/:id/options', async (c) => {
   const accountId = c.req.query('account_id');
   if (!accountId) return c.json({ error: 'missing_account_id' }, 400);
-  const body = await c.req.json<{ add_google_meet?: unknown }>().catch(() => ({ add_google_meet: undefined }));
-  if (typeof body.add_google_meet !== 'boolean') return c.json({ error: 'add_google_meet must be a boolean' }, 400);
+  const body = await c.req
+    .json<{ add_google_meet?: unknown; max_active_per_friend?: unknown }>()
+    .catch(() => ({ add_google_meet: undefined, max_active_per_friend: undefined }));
+  if (body.add_google_meet !== undefined && typeof body.add_google_meet !== 'boolean') {
+    return c.json({ error: 'add_google_meet must be a boolean' }, 400);
+  }
+  if (body.max_active_per_friend !== undefined && body.max_active_per_friend !== null
+    && !(typeof body.max_active_per_friend === 'number' && Number.isInteger(body.max_active_per_friend)
+      && body.max_active_per_friend >= 1 && body.max_active_per_friend <= 100)) {
+    return c.json({ error: 'max_active_per_friend must be an integer between 1 and 100, or null' }, 400);
+  }
   const menu = await c.env.DB
     .prepare(`SELECT id FROM menus WHERE id = ? AND line_account_id = ? AND deleted_at IS NULL`)
     .bind(c.req.param('id'), accountId)
     .first<{ id: string }>();
   if (!menu) return c.json({ error: 'not_found' }, 404);
+  const current = await c.env.DB
+    .prepare(`SELECT add_google_meet, max_active_per_friend FROM booking_menu_options WHERE menu_id = ?`)
+    .bind(menu.id)
+    .first<{ add_google_meet: number; max_active_per_friend: number | null }>();
+  const addGoogleMeet = body.add_google_meet === undefined ? current?.add_google_meet === 1 : body.add_google_meet === true;
+  const maxActive = body.max_active_per_friend === undefined
+    ? current?.max_active_per_friend ?? null
+    : (body.max_active_per_friend as number | null);
   await c.env.DB
     .prepare(
-      `INSERT INTO booking_menu_options (menu_id, add_google_meet) VALUES (?, ?)
+      `INSERT INTO booking_menu_options (menu_id, add_google_meet, max_active_per_friend) VALUES (?, ?, ?)
        ON CONFLICT(menu_id) DO UPDATE SET add_google_meet = excluded.add_google_meet,
+         max_active_per_friend = excluded.max_active_per_friend,
          updated_at = strftime('%Y-%m-%dT%H:%M:%f', 'now', '+9 hours')`,
     )
-    .bind(menu.id, body.add_google_meet ? 1 : 0)
+    .bind(menu.id, addGoogleMeet ? 1 : 0, maxActive)
     .run();
-  return c.json({ add_google_meet: body.add_google_meet });
+  return c.json({ add_google_meet: addGoogleMeet, max_active_per_friend: maxActive });
+});
+
+// ---------------------------------------------------------------
+// アカウントの予約の決まり
+
+bookingAutomation.get('/api/booking/admin/booking-settings', async (c) => {
+  const accountId = c.req.query('account_id');
+  if (!accountId) return c.json({ error: 'missing_account_id' }, 400);
+  return c.json({ settings: await loadBookingRules(c.env.DB, accountId) });
+});
+
+bookingAutomation.put('/api/booking/admin/booking-settings', async (c) => {
+  const accountId = c.req.query('account_id');
+  if (!accountId) return c.json({ error: 'missing_account_id' }, 400);
+  const input = await c.req.json<Record<string, unknown>>().catch(() => ({}) as Record<string, unknown>);
+  const current = await loadBookingRules(c.env.DB, accountId);
+  const merged = { ...current, ...input } as Record<string, unknown>;
+  const error = validateBookingRulesInput(merged);
+  if (error) return c.json({ error }, 400);
+  if (merged.fixedMenuId) {
+    const menu = await c.env.DB
+      .prepare(`SELECT id FROM menus WHERE id = ? AND line_account_id = ? AND deleted_at IS NULL`)
+      .bind(merged.fixedMenuId, accountId)
+      .first<{ id: string }>();
+    if (!menu) return c.json({ error: 'fixed_menu_not_found' }, 400);
+  }
+  const next: BookingRules = {
+    menuSelect: merged.menuSelect as boolean,
+    fixedMenuId: (merged.fixedMenuId as string | null) ?? null,
+    showMenuName: merged.showMenuName as boolean,
+    staffSelect: merged.staffSelect as boolean,
+    showStaffName: merged.showStaffName as boolean,
+    minLeadMinutes: merged.minLeadMinutes as number,
+    cutoffPrevDayTime: (merged.cutoffPrevDayTime as string | null) ?? null,
+    maxDaysAhead: (merged.maxDaysAhead as number | null) ?? null,
+    closedOnHolidays: merged.closedOnHolidays as boolean,
+  };
+  await saveBookingRules(c.env.DB, accountId, next);
+  return c.json({ settings: await loadBookingRules(c.env.DB, accountId) });
+});
+
+// ---------------------------------------------------------------
+// 担当者の自動割り振りの優先度（大きいほど先に割り振る）
+
+bookingAutomation.get('/api/booking/admin/staff/:id/priority', async (c) => {
+  const accountId = c.req.query('account_id');
+  if (!accountId) return c.json({ error: 'missing_account_id' }, 400);
+  const staff = await c.env.DB
+    .prepare(`SELECT id FROM staff WHERE id = ? AND line_account_id = ? AND deleted_at IS NULL`)
+    .bind(c.req.param('id'), accountId)
+    .first<{ id: string }>();
+  if (!staff) return c.json({ error: 'not_found' }, 404);
+  const row = await c.env.DB
+    .prepare(`SELECT priority FROM booking_staff_priority WHERE staff_id = ?`)
+    .bind(staff.id)
+    .first<{ priority: number }>();
+  return c.json({ priority: row?.priority ?? 0 });
+});
+
+bookingAutomation.put('/api/booking/admin/staff/:id/priority', async (c) => {
+  const accountId = c.req.query('account_id');
+  if (!accountId) return c.json({ error: 'missing_account_id' }, 400);
+  const body = await c.req.json<{ priority?: unknown }>().catch(() => ({ priority: undefined }));
+  if (!(typeof body.priority === 'number' && Number.isInteger(body.priority) && body.priority >= -1000 && body.priority <= 1000)) {
+    return c.json({ error: 'priority must be an integer between -1000 and 1000' }, 400);
+  }
+  const staff = await c.env.DB
+    .prepare(`SELECT id FROM staff WHERE id = ? AND line_account_id = ? AND deleted_at IS NULL`)
+    .bind(c.req.param('id'), accountId)
+    .first<{ id: string }>();
+  if (!staff) return c.json({ error: 'not_found' }, 404);
+  await c.env.DB
+    .prepare(
+      `INSERT INTO booking_staff_priority (staff_id, priority) VALUES (?, ?)
+       ON CONFLICT(staff_id) DO UPDATE SET priority = excluded.priority,
+         updated_at = strftime('%Y-%m-%dT%H:%M:%f', 'now', '+9 hours')`,
+    )
+    .bind(staff.id, body.priority)
+    .run();
+  return c.json({ priority: body.priority });
 });
 
 // ---------------------------------------------------------------

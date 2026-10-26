@@ -184,6 +184,34 @@ describe('handleBookingEvent', () => {
   });
 });
 
+describe('attended / no_show', () => {
+  it('records 来た and fires booking_attended; ended later keeps 来た', async () => {
+    const t = setup();
+    t.booking('b1', 'completed');
+    t.automation('auto-att', 'booking_attended', {}, [{ type: 'add_tag', params: { tagId: 'tag-ended' } }]);
+    await handleBookingEvent({ db: t.db, now: () => new Date('2026-10-27T02:00:00Z') }, 'b1', 'attended');
+    expect(t.metadata()).toMatchObject({ 予約状態: '来た' });
+    expect(t.friendTags()).toEqual(['tag-ended']);
+    await processBookingEnded({ db: t.db, now: () => new Date('2026-10-27T02:10:00Z') });
+    expect(t.metadata()).toMatchObject({ 予約状態: '来た' });
+  });
+
+  it('records 来なかった', async () => {
+    const t = setup();
+    t.booking('b1', 'no_show');
+    await handleBookingEvent({ db: t.db, now: () => new Date('2026-10-27T02:00:00Z') }, 'b1', 'no_show');
+    expect(t.metadata()).toMatchObject({ 予約状態: '来なかった' });
+  });
+
+  it('hides names from customer-facing metadata when the account says so', async () => {
+    const t = setup();
+    t.booking('b1', 'requested');
+    t.sqlite.exec(`INSERT INTO account_settings(id,line_account_id,key,value) VALUES('r','acc','booking_rules','{"showStaffName":false}')`);
+    await handleBookingEvent({ db: t.db, now: () => new Date('2026-10-25T03:00:00Z') }, 'b1', 'requested');
+    expect(t.metadata()).toMatchObject({ 予約担当者: '', 予約メニュー: '無料診断' });
+  });
+});
+
 describe('processBookingEnded', () => {
   it('marks the booking ended and fires "N minutes after" rules once', async () => {
     const t = setup();

@@ -22,6 +22,7 @@ import { summarizeAutomationActions } from './automation-action-summary'
 
 type AutomationEventType = 'friend_add' | 'tag_change' | 'score_threshold' | 'cv_fire' | 'message_received' | 'postback_received' | 'calendar_booked'
   | 'booking_requested' | 'booking_approved' | 'booking_rejected' | 'booking_expired' | 'booking_cancelled' | 'booking_ended'
+  | 'booking_attended' | 'booking_no_show'
 
 interface AutomationAction {
   type: 'add_tag' | 'remove_tag' | 'start_scenario' | 'send_message' | 'send_webhook' | 'switch_rich_menu'
@@ -56,6 +57,8 @@ const eventTypeOptions: { value: AutomationEventType; label: string }[] = [
   { value: 'booking_expired', label: '予約：期限切れ' },
   { value: 'booking_cancelled', label: '予約：キャンセル' },
   { value: 'booking_ended', label: '予約：終了後' },
+  { value: 'booking_attended', label: '予約：来た' },
+  { value: 'booking_no_show', label: '予約：来なかった' },
 ]
 
 const isBookingEvent = (eventType: AutomationEventType) => eventType.startsWith('booking_') || eventType === 'calendar_booked'
@@ -76,6 +79,8 @@ const eventTypeBadgeVariant: Record<AutomationEventType, BadgeVariant> = {
   booking_expired: 'blue',
   booking_cancelled: 'blue',
   booking_ended: 'blue',
+  booking_attended: 'blue',
+  booking_no_show: 'blue',
 }
 
 interface CreateFormState {

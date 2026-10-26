@@ -190,7 +190,7 @@ CREATE TABLE IF NOT EXISTS booking_menu_options (
   add_google_meet  INTEGER NOT NULL DEFAULT 0,
   created_at       TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%f', 'now', '+9 hours')),
   updated_at       TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%f', 'now', '+9 hours'))
-);
+, max_active_per_friend INTEGER);
 
 CREATE TABLE IF NOT EXISTS booking_menu_reminders (
   menu_id      TEXT NOT NULL,
@@ -209,6 +209,12 @@ CREATE TABLE IF NOT EXISTS booking_reminders (
   retry_count   INTEGER NOT NULL DEFAULT 0,
   last_error    TEXT,
   FOREIGN KEY (booking_id) REFERENCES bookings(id)
+);
+
+CREATE TABLE IF NOT EXISTS booking_staff_priority (
+  staff_id    TEXT PRIMARY KEY,
+  priority    INTEGER NOT NULL DEFAULT 0,
+  updated_at  TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%f', 'now', '+9 hours'))
 );
 
 CREATE TABLE IF NOT EXISTS bookings (

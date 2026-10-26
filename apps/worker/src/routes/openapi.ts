@@ -258,7 +258,7 @@ const spec = {
     '/api/booking/admin/menus/{id}/options': {
       get: {
         tags: ['Booking'],
-        summary: 'メニューの設定（承認時に Google Meet を付けるか）',
+        summary: 'メニューの設定（承認時に Google Meet を付けるか、1人あたりの予約数の上限）',
         parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }, { name: 'account_id', in: 'query', required: true, schema: { type: 'string' } }],
         responses: { '200': { description: '{ add_google_meet: boolean }' } },
       },
@@ -266,7 +266,37 @@ const spec = {
         tags: ['Booking'],
         summary: 'メニューの設定を保存（承認時に Google Meet を付けるか）',
         parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }, { name: 'account_id', in: 'query', required: true, schema: { type: 'string' } }],
-        requestBody: { content: { 'application/json': { schema: { type: 'object', properties: { add_google_meet: { type: 'boolean' } }, required: ['add_google_meet'] } } } },
+        requestBody: { content: { 'application/json': { schema: { type: 'object', properties: { add_google_meet: { type: 'boolean' }, max_active_per_friend: { type: 'integer', nullable: true, description: '1人が同時に持てる予約の数（null は上限なし）' } } } } } },
+        responses: { '200': { description: 'Saved' } },
+      },
+    },
+    '/api/booking/admin/booking-settings': {
+      get: {
+        tags: ['Booking'],
+        summary: '予約の決まり（表示・受付の締切・何日先まで・祝日）',
+        parameters: [{ name: 'account_id', in: 'query', required: true, schema: { type: 'string' } }],
+        responses: { '200': { description: '{ settings }' } },
+      },
+      put: {
+        tags: ['Booking'],
+        summary: '予約の決まりを保存（送った項目だけ変わる）',
+        parameters: [{ name: 'account_id', in: 'query', required: true, schema: { type: 'string' } }],
+        requestBody: { content: { 'application/json': { schema: { type: 'object', properties: { menuSelect: { type: 'boolean' }, fixedMenuId: { type: 'string', nullable: true }, showMenuName: { type: 'boolean' }, staffSelect: { type: 'boolean', description: 'false で担当者を選ばせず自動で割り振る' }, showStaffName: { type: 'boolean' }, minLeadMinutes: { type: 'integer', description: '開始の何分前まで受け付けるか（既定60）' }, cutoffPrevDayTime: { type: 'string', nullable: true, description: 'HH:MM。予約日の前日のこの時刻まで' }, maxDaysAhead: { type: 'integer', nullable: true }, closedOnHolidays: { type: 'boolean' } } } } } },
+        responses: { '200': { description: '{ settings }' } },
+      },
+    },
+    '/api/booking/admin/staff/{id}/priority': {
+      get: {
+        tags: ['Booking'],
+        summary: '担当者の自動割り振りの優先度',
+        parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }, { name: 'account_id', in: 'query', required: true, schema: { type: 'string' } }],
+        responses: { '200': { description: '{ priority }' } },
+      },
+      put: {
+        tags: ['Booking'],
+        summary: '担当者の自動割り振りの優先度を保存（大きいほど先）',
+        parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }, { name: 'account_id', in: 'query', required: true, schema: { type: 'string' } }],
+        requestBody: { content: { 'application/json': { schema: { type: 'object', properties: { priority: { type: 'integer' } }, required: ['priority'] } } } },
         responses: { '200': { description: 'Saved' } },
       },
     },

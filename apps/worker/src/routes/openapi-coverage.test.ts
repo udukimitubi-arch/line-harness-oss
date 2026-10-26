@@ -75,13 +75,14 @@ function documentedRoutes(): string[] {
  * 迷ったら KNOWN_GAPS に置く（負債として見えるほうが安全）。
  */
 const CLIENT_ONLY: readonly string[] = [
-  // liff (29)
+  // liff (30)
   'GET /api/liff/affiliate/me',
   'GET /api/liff/affiliate/offers',
   'GET /api/liff/booking/availability',
   'GET /api/liff/booking/me',
   'GET /api/liff/booking/menus',
   'GET /api/liff/booking/menus/{id}/staff',
+  'GET /api/liff/booking/settings',
   'GET /api/liff/config',
   'GET /api/liff/events/me',
   'GET /api/liff/events/me/{bookingId}',

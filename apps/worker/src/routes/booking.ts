@@ -30,6 +30,12 @@ import { sendBookingNotification } from '../services/booking-notifier.js';
 import { insertConfirmationReminders } from '../services/booking-confirm.js';
 import { queueBookingEvent } from '../services/booking-automation-hooks.js';
 import { getBookingMeetUrl, syncConfirmedBookingWithMeet } from '../services/booking-meet.js';
+import {
+  applyBookingRules,
+  autoAssignCandidates,
+  friendReachedMenuLimit,
+  loadBookingRules,
+} from '../services/booking-rules.js';
 import { attachTagAndFireSideEffects } from '../services/friend-tag-attach.js';
 import {
   DEFAULT_ACCOUNT_SETTINGS,
@@ -288,6 +294,9 @@ async function notifyForBooking(
       line_account_id: string;
     }>();
   if (!row) return;
+  const rules = await loadBookingRules(db, row.line_account_id);
+  if (!rules.showMenuName) row.menu_name = '';
+  if (!rules.showStaffName) row.staff_name = '';
   await sendBookingNotification({
     channelAccessToken: row.channel_access_token,
     toLineUserId: row.line_user_id,
@@ -361,6 +370,7 @@ booking.get('/api/liff/booking/availability', async (c) => {
   if ((toD.getTime() - fromD.getTime()) / 86400_000 > 28) {
     return c.json({ error: 'range_too_wide' }, 400);
   }
+  const rules = await loadBookingRules(c.env.DB, accountId);
   const result = await getAvailability(c.env.DB, {
     lineAccountId: accountId,
     menuId,
@@ -368,10 +378,24 @@ booking.get('/api/liff/booking/availability', async (c) => {
     from,
     to,
     now: new Date(),
-    minLeadTimeMinutes: DEFAULT_ACCOUNT_SETTINGS.min_lead_time_minutes,
+    minLeadTimeMinutes: rules.minLeadMinutes,
     googleCredentials: googleCredentials(c.env),
   });
-  return c.json(result);
+  return c.json(await applyBookingRules(c.env.DB, result, rules, new Date()));
+});
+
+// 予約画面の表示の決まり（メニュー・担当者を選ばせるか、名前を出すか）。services/booking-rules.ts
+booking.get('/api/liff/booking/settings', async (c) => {
+  const accountId = await resolveAccountIdFromLiff(c);
+  if (!accountId) return c.json({ error: 'unknown_liff' }, 404);
+  const rules = await loadBookingRules(c.env.DB, accountId);
+  return c.json({
+    menu_select: rules.menuSelect,
+    fixed_menu_id: rules.fixedMenuId,
+    show_menu_name: rules.showMenuName,
+    staff_select: rules.staffSelect,
+    show_staff_name: rules.showStaffName,
+  });
 });
 
 booking.post('/api/liff/booking/requests', async (c) => {
@@ -386,11 +410,11 @@ booking.post('/api/liff/booking/requests', async (c) => {
 
   const body = await c.req.json<{
     menu_id: string;
-    staff_id: string;
+    staff_id?: string; // 担当者を選ばせない設定のときは省略できる（自動で割り振る）
     starts_at: string; // UTC ISO8601
     customer_note?: string;
   }>();
-  if (!body.menu_id || !body.staff_id || !body.starts_at) {
+  if (!body.menu_id || !body.starts_at) {
     return c.json({ error: 'missing_params' }, 400);
   }
   const friendId = await resolveFriendId(c, callerLineUserId, accountId);
@@ -417,106 +441,139 @@ booking.post('/api/liff/booking/requests', async (c) => {
     return c.json({ error: 'cannot_book' }, 403);
   }
 
-  // Menu + staff_menu lookup (must be offered)
-  const menuRow = await c.env.DB
-    .prepare(
-      `SELECT m.id, m.duration_minutes, m.buffer_after_minutes, m.base_price,
-              m.auto_tag_id,
-              COALESCE(sm.override_duration_minutes, m.duration_minutes) AS dur,
-              COALESCE(sm.override_price, m.base_price) AS price,
-              sm.is_offered
-         FROM menus m
-         LEFT JOIN staff_menus sm ON sm.menu_id = m.id AND sm.staff_id = ?2
-        WHERE m.id = ?1 AND m.line_account_id = ?3
-          AND m.deleted_at IS NULL AND m.is_active = 1`,
-    )
-    .bind(body.menu_id, body.staff_id, accountId)
-    .first<{ duration_minutes: number; buffer_after_minutes: number; auto_tag_id: string | null; dur: number; price: number; is_offered: number | null }>();
-  if (!menuRow || menuRow.is_offered !== 1) {
-    return c.json({ error: 'menu_not_offered' }, 422);
+  // 予約の決まり（自動割り振り・1人あたりの上限・受付の締切・祝日）。services/booking-rules.ts
+  const rules = await loadBookingRules(c.env.DB, accountId);
+  if (await friendReachedMenuLimit(c.env.DB, friendId, body.menu_id, new Date())) {
+    return c.json({ error: 'limit_reached' }, 409);
   }
-
-  const startsAt = new Date(body.starts_at);
-  if (Number.isNaN(startsAt.getTime())) {
-    return c.json({ error: 'invalid_starts_at' }, 422);
+  // 担当者の指定が無いとき（担当者を選ばせない設定）は、優先度の高い順に空いている人へ入れる。
+  const candidates = body.staff_id
+    ? [body.staff_id]
+    : rules.staffSelect
+      ? []
+      : await autoAssignCandidates(c.env.DB, accountId, body.menu_id);
+  if (candidates.length === 0) {
+    return c.json({ error: body.staff_id ? 'missing_params' : 'no_staff_available' }, body.staff_id ? 400 : 422);
   }
-  if (startsAt < new Date()) {
-    return c.json({ error: 'past_datetime' }, 422);
-  }
-  const endsAt = new Date(startsAt.getTime() + menuRow.dur * 60_000);
-  const blockEndsAt = new Date(endsAt.getTime() + menuRow.buffer_after_minutes * 60_000);
+  type MenuRowT = { duration_minutes: number; buffer_after_minutes: number; auto_tag_id: string | null; dur: number; price: number; is_offered: number | null };
+  let chosen: { staffId: string; bookingId: string; menuRow: MenuRowT; startsAt: Date; endsAt: Date; nowIso: string } | null = null;
+  let lastError: { body: { error: string }; status: 409 | 422 } = { body: { error: 'slot_not_available' }, status: 422 };
+  for (const staffId of candidates) {
+    // Menu + staff_menu lookup (must be offered)
+    const menuRow = await c.env.DB
+      .prepare(
+        `SELECT m.id, m.duration_minutes, m.buffer_after_minutes, m.base_price,
+                m.auto_tag_id,
+                COALESCE(sm.override_duration_minutes, m.duration_minutes) AS dur,
+                COALESCE(sm.override_price, m.base_price) AS price,
+                sm.is_offered
+           FROM menus m
+           LEFT JOIN staff_menus sm ON sm.menu_id = m.id AND sm.staff_id = ?
+          WHERE m.id = ? AND m.line_account_id = ?
+            AND m.deleted_at IS NULL AND m.is_active = 1`,
+      )
+      .bind(staffId, body.menu_id, accountId)
+      .first<{ duration_minutes: number; buffer_after_minutes: number; auto_tag_id: string | null; dur: number; price: number; is_offered: number | null }>();
+    if (!menuRow || menuRow.is_offered !== 1) {
+      lastError = { body: { error: 'menu_not_offered' }, status: 422 };
+      continue;
+    }
 
-  // Server-side availability 再検証: 曜日受付時間 / Google Calendar /
-  // リードタイム / 既存予約を、確定直前にもう一度突合する。
-  const startJstDate = new Date(startsAt.getTime() + 9 * 3600_000).toISOString().slice(0, 10);
-  const startJstHHMM = new Date(startsAt.getTime() + 9 * 3600_000).toISOString().slice(11, 16);
-  const latestAvailability = await getAvailability(c.env.DB, {
-    lineAccountId: accountId,
-    menuId: body.menu_id,
-    staffId: body.staff_id,
-    from: startJstDate,
-    to: startJstDate,
-    now: new Date(),
-    minLeadTimeMinutes: DEFAULT_ACCOUNT_SETTINGS.min_lead_time_minutes,
-    googleCredentials: googleCredentials(c.env),
-  });
-  const slotMatched = latestAvailability.by_staff[0]?.slots.some(
-    (slot) => slot.date === startJstDate && slot.start === startJstHHMM,
-  );
-  if (!slotMatched) return c.json({ error: 'slot_not_available' }, 422);
+    const startsAt = new Date(body.starts_at);
+    if (Number.isNaN(startsAt.getTime())) {
+      return c.json({ error: 'invalid_starts_at' }, 422);
+    }
+    if (startsAt < new Date()) {
+      return c.json({ error: 'past_datetime' }, 422);
+    }
+    const endsAt = new Date(startsAt.getTime() + menuRow.dur * 60_000);
+    const blockEndsAt = new Date(endsAt.getTime() + menuRow.buffer_after_minutes * 60_000);
 
-  const bookingId = crypto.randomUUID();
-  const nowIso = new Date().toISOString();
-  // 競合チェックと INSERT を 1 ステートメントで原子化する。
-  // INSERT ... SELECT WHERE NOT EXISTS パターンで、同一スタッフの overlap 行がある場合は
-  // 0 行 INSERT に落とす。changes=0 を 409 として扱う。
-  const insertResult = await c.env.DB
-    .prepare(
-      `INSERT INTO bookings
-        (id, line_account_id, friend_id, staff_id, menu_id,
-         starts_at, ends_at, block_ends_at, status,
-         customer_note, price_at_booking, requested_at)
-       SELECT ?,?,?,?,?,?,?,?,?,?,?,?
-        WHERE NOT EXISTS (
-          SELECT 1 FROM bookings
-           WHERE staff_id = ?
-             AND status IN ('requested','confirmed')
-             AND starts_at < ?
-             AND block_ends_at > ?
-        )`,
-    )
-    .bind(
-      bookingId,
-      accountId,
-      friendId,
-      body.staff_id,
-      body.menu_id,
-      startsAt.toISOString(),
-      endsAt.toISOString(),
-      blockEndsAt.toISOString(),
-      'requested' satisfies BookingStatus,
-      body.customer_note ?? null,
-      menuRow.price,
-      nowIso,
-      // NOT EXISTS subquery params
-      body.staff_id,
-      blockEndsAt.toISOString(),
-      startsAt.toISOString(),
-    )
-    .run();
-  if ((insertResult.meta?.changes ?? 0) === 0) {
-    const err = { error: 'slot_conflict' };
-    await saveIdempotencyResponse(c.env.DB, {
-      key: idemKey,
+    // Server-side availability 再検証: 曜日受付時間 / Google Calendar /
+    // リードタイム / 既存予約を、確定直前にもう一度突合する。
+    const startJstDate = new Date(startsAt.getTime() + 9 * 3600_000).toISOString().slice(0, 10);
+    const startJstHHMM = new Date(startsAt.getTime() + 9 * 3600_000).toISOString().slice(11, 16);
+    const latestAvailability = await getAvailability(c.env.DB, {
       lineAccountId: accountId,
-      friendId,
-      status: 409,
-      body: err,
-      ttlMinutes: IDEMPOTENCY_TTL_MINUTES,
+      menuId: body.menu_id,
+      staffId: staffId,
+      from: startJstDate,
+      to: startJstDate,
       now: new Date(),
+      minLeadTimeMinutes: rules.minLeadMinutes,
+      googleCredentials: googleCredentials(c.env),
     });
-    return c.json(err, 409);
+    const ruledAvailability = await applyBookingRules(c.env.DB, latestAvailability, rules, new Date());
+    const slotMatched = ruledAvailability.by_staff[0]?.slots.some(
+      (slot) => slot.date === startJstDate && slot.start === startJstHHMM,
+    );
+    if (!slotMatched) {
+      lastError = { body: { error: 'slot_not_available' }, status: 422 };
+      continue;
+    }
+
+    const bookingId = crypto.randomUUID();
+    const nowIso = new Date().toISOString();
+    // 競合チェックと INSERT を 1 ステートメントで原子化する。
+    // INSERT ... SELECT WHERE NOT EXISTS パターンで、同一スタッフの overlap 行がある場合は
+    // 0 行 INSERT に落とす。changes=0 を 409 として扱う。
+    const insertResult = await c.env.DB
+      .prepare(
+        `INSERT INTO bookings
+          (id, line_account_id, friend_id, staff_id, menu_id,
+           starts_at, ends_at, block_ends_at, status,
+           customer_note, price_at_booking, requested_at)
+         SELECT ?,?,?,?,?,?,?,?,?,?,?,?
+          WHERE NOT EXISTS (
+            SELECT 1 FROM bookings
+             WHERE staff_id = ?
+               AND status IN ('requested','confirmed')
+               AND starts_at < ?
+               AND block_ends_at > ?
+          )`,
+      )
+      .bind(
+        bookingId,
+        accountId,
+        friendId,
+        staffId,
+        body.menu_id,
+        startsAt.toISOString(),
+        endsAt.toISOString(),
+        blockEndsAt.toISOString(),
+        'requested' satisfies BookingStatus,
+        body.customer_note ?? null,
+        menuRow.price,
+        nowIso,
+        // NOT EXISTS subquery params
+        staffId,
+        blockEndsAt.toISOString(),
+        startsAt.toISOString(),
+      )
+      .run();
+    if ((insertResult.meta?.changes ?? 0) === 0) {
+      lastError = { body: { error: 'slot_conflict' }, status: 409 };
+      continue;
+    }
+    chosen = { staffId, bookingId, menuRow, startsAt, endsAt, nowIso };
+    break;
   }
+  if (!chosen) {
+    if (lastError.status === 409) {
+      await saveIdempotencyResponse(c.env.DB, {
+        key: idemKey,
+        lineAccountId: accountId,
+        friendId,
+        status: 409,
+        body: lastError.body,
+        ttlMinutes: IDEMPOTENCY_TTL_MINUTES,
+        now: new Date(),
+      });
+    }
+    return c.json(lastError.body, lastError.status);
+  }
+  const { bookingId, menuRow, nowIso } = chosen;
+  const chosenStaffId = chosen.staffId;
 
   c.executionCtx.waitUntil(
     awardActivityMileage(c.env.DB, {
@@ -524,7 +581,7 @@ booking.post('/api/liff/booking/requests', async (c) => {
       source: 'booking',
       sourceEventId: bookingId,
       friendId,
-      metadata: { bookingType: 'salon', menuId: body.menu_id, staffId: body.staff_id },
+      metadata: { bookingType: 'salon', menuId: body.menu_id, staffId: chosenStaffId },
       occurredAt: nowIso,
     }),
   );
@@ -1710,6 +1767,8 @@ booking.patch('/api/booking/admin/requests/:id', async (c) => {
 
   if (next === 'confirmed') queueBookingEvent(c, id, 'approved');
   else if (next === 'rejected' || next === 'cancelled' || next === 'expired') queueBookingEvent(c, id, next);
+  else if (next === 'completed') queueBookingEvent(c, id, 'attended');
+  else if (next === 'no_show') queueBookingEvent(c, id, 'no_show');
 
   return c.json({ status: next });
 });

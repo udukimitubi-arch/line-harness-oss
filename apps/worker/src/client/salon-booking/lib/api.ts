@@ -39,6 +39,37 @@ export interface AvailabilityResponse {
   }>;
 }
 
+/** 予約画面の表示の決まり（GET /api/liff/booking/settings）。 */
+export interface BookingDisplaySettings {
+  menu_select: boolean;
+  fixed_menu_id: string | null;
+  show_menu_name: boolean;
+  staff_select: boolean;
+  show_staff_name: boolean;
+}
+
+export const DEFAULT_DISPLAY_SETTINGS: BookingDisplaySettings = {
+  menu_select: true,
+  fixed_menu_id: null,
+  show_menu_name: true,
+  staff_select: true,
+  show_staff_name: true,
+};
+
+/** 担当者を選ばせないときの「おまかせ」。id が空なら、サーバーが空いている人に割り振る。 */
+export function autoStaffFor(menu: MenuItem): StaffItem {
+  return {
+    id: '',
+    display_name: 'おまかせ',
+    role: null,
+    profile_image_url: null,
+    bio: null,
+    is_designation_optional: 1,
+    price: menu.base_price,
+    duration_minutes: menu.duration_minutes,
+  };
+}
+
 export interface BookingHistoryItem {
   id: string;
   starts_at: string;
@@ -91,6 +122,7 @@ async function post<T>(
 export function createApi(ctx: SalonBookingContext) {
   return {
     menus: () => get<{ menus: MenuItem[] }>('/api/liff/booking/menus', ctx),
+    settings: () => get<BookingDisplaySettings>('/api/liff/booking/settings', ctx),
     staffOf: (menuId: string) =>
       get<{ staff: StaffItem[] }>(`/api/liff/booking/menus/${menuId}/staff`, ctx),
     availability: (
@@ -104,7 +136,7 @@ export function createApi(ctx: SalonBookingContext) {
       return get<AvailabilityResponse>(`/api/liff/booking/availability?${qs}`, ctx);
     },
     createRequest: (
-      body: { menu_id: string; staff_id: string; starts_at: string; customer_note?: string },
+      body: { menu_id: string; staff_id?: string; starts_at: string; customer_note?: string },
       idempotencyKey: string,
     ) =>
       post<{ booking_id: string; status: string }>(
