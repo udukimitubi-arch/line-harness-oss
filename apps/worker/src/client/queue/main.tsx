@@ -103,7 +103,7 @@ function JoinForm({ status, token, onJoined, api }: {
               <strong>事前受付のご注意</strong><br />
               お店に着いたら、入口のQRを読んでください。<br />
               順番が来ても着いていない場合は、次の方を先にご案内します。着いてQRを読めば、次にご案内します。
-              {s.arrival_timeout_minutes > 0 ? <><br />受付から{s.arrival_timeout_minutes}分たってもQRが読まれない場合は、自動でキャンセルになります。</> : null}
+              {s.arrival_timeout_minutes > 0 ? <><br />順番が来てから{s.arrival_timeout_minutes}分たってもQRが読まれない場合は、自動でキャンセルになります。</> : null}
             </div>
           ) : null}
 
@@ -148,6 +148,7 @@ function TicketView({ entry, status, justArrived, onCancel, cancelling }: {
           ) : entry.passed && !entry.arrived ? (
             <div className="mt-4 rounded-xl px-4 py-3 text-center text-[14px] leading-6" style={{ background: '#FFF4EA', color: '#5B3415' }}>
               順番が来ています。着いて入口のQRを読めば、次にご案内します。
+              {(status?.settings.arrival_timeout_minutes ?? 0) > 0 ? `${status?.settings.arrival_timeout_minutes}分以内にQRが読まれない場合は、自動でキャンセルになります。` : ''}
             </div>
           ) : (
             <div className="mt-3 flex items-baseline gap-1.5">

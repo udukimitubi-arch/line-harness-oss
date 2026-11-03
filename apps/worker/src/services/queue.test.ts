@@ -179,6 +179,9 @@ describe('runQueueMaintenance', () => {
     const remote = await createEntry(db, { lineAccountId: 'acc1', friendId: 'fr', partySize: 2, kind: 'remote', now: T0 });
     const walk = await createEntry(db, { lineAccountId: 'acc1', friendId: 'fw', partySize: 2, kind: 'walk_in', now: T0 });
     const yesterday = await createEntry(db, { lineAccountId: 'acc1', friendId: 'fy', partySize: 1, kind: 'walk_in', now: new Date(T0.getTime() - 86_400_000) });
+    // walk より後ろの事前受付は、順番がまだ来ていない
+    const later = await createEntry(db, { lineAccountId: 'acc1', friendId: 'fl', partySize: 2, kind: 'remote', now: T0 });
+    // walk を呼ぶと、前にいた remote は飛ばし中になる（ここから30分を数える）
     await applyQueueAction(db, cfg, walk.id, 'call', at(1));
 
     const early = await runQueueMaintenance(db, at(5));
@@ -190,7 +193,10 @@ describe('runQueueMaintenance', () => {
     expect(late.noShows).toBe(1);
     expect(late.notices.map((n) => n.notice.kind)).toContain('arrival_timeout');
     expect(late.noShowEntries.map((e) => e.id)).toEqual([walk.id]);
-    expect(await listActiveEntries(db, 'acc1', jstBusinessDate(T0))).toEqual([]);
+    expect(late.notices.find((n) => n.notice.kind === 'arrival_timeout')?.notice.friendId).toBe('fr');
+    // 順番が来ていない事前受付は、受付から何分たってもキャンセルしない
+    await runQueueMaintenance(db, at(120));
+    expect((await listActiveEntries(db, 'acc1', jstBusinessDate(T0))).map((e) => e.id)).toEqual([later.id]);
     expect(remote.id && yesterday.id).toBeTruthy();
   });
 });

@@ -187,8 +187,8 @@ export default function QueueSettingsPage() {
               <Input label="受付を始める時刻の何分前から受けるか" type="number" min={0} value={form.remoteStartMinutesBefore} onChange={(e) => update({ remoteStartMinutesBefore: e.target.value })} />
               <Input label="列のうち事前受付が占めてよい割合 %（空欄 = 制限なし）" type="number" min={0} max={100} value={form.remoteMaxPercent} onChange={(e) => update({ remoteMaxPercent: e.target.value })} />
               <Input label="待ちがこの組数以上なら事前受付を止める（空欄 = 制限なし）" type="number" min={1} value={form.remoteStopAtGroups} onChange={(e) => update({ remoteStopAtGroups: e.target.value })} />
-              <Input label="受付から何分たっても到着（QR）しなければ自動キャンセルするか（0 = しない）" type="number" min={0} value={form.arrivalTimeoutMinutes} onChange={(e) => update({ arrivalTimeoutMinutes: e.target.value })} />
-              <p className="text-xs text-gray-500">順番が来ても到着していない人は飛ばして、次の到着済みの人を呼びます。その人が到着してQRを読むと、列の一番前に戻ります。</p>
+              <Input label="順番が来て飛ばしてから何分たっても到着（QR）しなければ自動キャンセルするか（0 = しない）" type="number" min={0} value={form.arrivalTimeoutMinutes} onChange={(e) => update({ arrivalTimeoutMinutes: e.target.value })} />
+              <p className="text-xs text-gray-500">順番が来ても到着していない人は飛ばして、次の到着済みの人を呼びます。その人が到着してQRを読むと、列の一番前に戻ります。順番が来る前は、どれだけ待っても自動ではキャンセルしません。</p>
             </LayerCard>
 
             <LayerCard className="p-6 space-y-4">

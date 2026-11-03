@@ -29,7 +29,7 @@ export interface QueueSettings {
   remoteStopAtGroups: number | null;
   /** 何組前にお知らせするか。0 で送らない。 */
   notifyBeforeGroups: number;
-  /** 事前受付から何分たっても到着しなければ自動キャンセルするか。0 で自動キャンセルしない。 */
+  /** 順番が来て飛ばされてから何分たっても到着しなければ自動キャンセルするか。0 で自動キャンセルしない。 */
   arrivalTimeoutMinutes: number;
   /** 呼び出しから何分で「不在」にするか。0 で自動にしない。 */
   noShowMinutes: number;
@@ -446,7 +446,7 @@ export function renderQueueNotice(
       if (n.remoteNotArrived) {
         lines.push('お店に着いたら、入口のQRを読んでください。');
         if (ctx.arrivalTimeoutMinutes > 0) {
-          lines.push(`受付から${ctx.arrivalTimeoutMinutes}分たってもQRが読まれない場合は、自動でキャンセルになります。`);
+          lines.push(`順番が来ても着いていない場合は次の方を先にご案内し、そこから${ctx.arrivalTimeoutMinutes}分たってもQRが読まれない場合は、自動でキャンセルになります。`);
         }
       }
       return lines.join('\n') + link;
@@ -461,6 +461,7 @@ export function renderQueueNotice(
       return (
         `順番が来ましたが、まだ到着の確認ができていません（番号：${no}）。\n` +
         '次の方を先にご案内しています。着いて入口のQRを読めば、次にご案内します。' +
+        (ctx.arrivalTimeoutMinutes > 0 ? `\n${ctx.arrivalTimeoutMinutes}分以内にQRが読まれない場合は、自動でキャンセルになります。` : '') +
         link
       );
     case 'called':
@@ -656,7 +657,8 @@ export interface MaintenanceResult {
 
 /**
  * 1. 前の日のまま残った列を閉じる。
- * 2. 事前受付から決まった時間たっても到着しない人を自動キャンセルする。
+ * 2. 順番が来て飛ばされてから決まった時間たっても到着しない人を自動キャンセルする。
+ *    順番が来る前は、どれだけ待っても自動ではキャンセルしない。
  * 3. 呼び出しから決まった時間たっても来ない人を「不在」にする。
  * 4. 列が動いたぶんの「N組前」のお知らせを集める。
  */
@@ -691,7 +693,8 @@ export async function runQueueMaintenance(db: D1Database, now: Date): Promise<Ma
         e.status === 'waiting' &&
         e.kind === 'remote' &&
         !e.arrived_at &&
-        now.getTime() - Date.parse(e.created_at) >= s.arrivalTimeoutMinutes * 60_000
+        e.passed_at &&
+        now.getTime() - Date.parse(e.passed_at) >= s.arrivalTimeoutMinutes * 60_000
       ) {
         if (await setStatus(db, e, 'cancelled', nowIso, { cancelReason: 'arrival_timeout' })) {
           result.arrivalTimeouts++;
