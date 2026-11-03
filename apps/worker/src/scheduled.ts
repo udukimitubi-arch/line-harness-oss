@@ -23,6 +23,7 @@ import { sendEventBookingNotification } from './services/event-booking-notifier.
 import { sendBookingNotification } from './services/booking-notifier.js';
 import { DEFAULT_ACCOUNT_SETTINGS, isBookingRemindersEnabled } from './services/booking-types.js';
 import { lineProxy } from './routes/line-proxy.js';
+import { runQueueTick } from './services/queue-delivery.js';
 import type { Env } from './index.js';
 
 /**
@@ -276,6 +277,18 @@ export async function scheduled(
       );
     } catch (e) {
       console.error('booking-expirer error:', e);
+    }
+
+    // 順番待ち: 到着しない事前受付の自動キャンセル・呼び出し後の自動の不在・N組前のお知らせ。
+    try {
+      const result = await runQueueTick(env.DB, new Date(), env);
+      if (result.arrivalTimeouts + result.noShows + result.dayEnded + result.sent > 0) {
+        console.log(
+          `[queue] arrival_timeouts=${result.arrivalTimeouts} no_shows=${result.noShows} day_ended=${result.dayEnded} sent=${result.sent}`,
+        );
+      }
+    } catch (e) {
+      console.error('queue tick error:', e);
     }
   }
 

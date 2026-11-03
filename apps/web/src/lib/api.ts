@@ -2265,3 +2265,94 @@ export const webinarApi = {
   userComments: (id: string) =>
     fetchApi<{ data: WebinarUserComment[] }>(`/api/webinars/${id}/user-comments`),
 }
+
+// ─── 順番待ち（Worker: /api/queue/admin/*）─────────────────
+
+export type QueueEntryStatus = 'waiting' | 'called' | 'visited' | 'no_show' | 'cancelled'
+export type QueueAction = 'call' | 'recall' | 'visit' | 'no_show' | 'defer' | 'cancel'
+
+export type QueueEntry = {
+  id: string
+  ticket_no: number
+  ticket_label: string
+  party_size: number
+  seat_type: string | null
+  kind: 'walk_in' | 'remote' | 'staff'
+  status: QueueEntryStatus
+  arrived: boolean
+  passed: boolean
+  groups_ahead: number
+  guest_label: string | null
+  has_line: boolean
+  call_count: number
+  called_at: string | null
+  created_at: string
+}
+
+export type QueueToday = {
+  business_date: string
+  is_open: boolean
+  remote_open: boolean
+  waiting_groups: number
+  entries: QueueEntry[]
+  stats: Record<QueueEntryStatus, number> & { total: number }
+}
+
+export type QueueSettings = {
+  openTime: string | null
+  closeTime: string | null
+  remoteStartMinutesBefore: number
+  remoteMaxPercent: number | null
+  remoteStopAtGroups: number | null
+  notifyBeforeGroups: number
+  arrivalTimeoutMinutes: number
+  noShowMinutes: number
+  maxPartySize: number
+  seatTypes: string[]
+  visitTagId: string | null
+  noShowTagId: string | null
+  sendConfirmation: boolean
+}
+
+export type QueueAdminSettings = {
+  settings: QueueSettings
+  is_open: boolean
+  remote_open: boolean
+  checkin_token: string
+  liff_id: string | null
+}
+
+export const queueApi = {
+  today: (accountId: string) => fetchApi<QueueToday>(withAccount('/api/queue/admin/entries', accountId)),
+  addEntry: (accountId: string, body: { party_size: number; seat_type?: string | null; guest_label?: string | null }) =>
+    fetchApi<{ entry: QueueEntry }>(withAccount('/api/queue/admin/entries', accountId), {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+  act: (accountId: string, entryId: string, action: QueueAction) =>
+    fetchApi<{ entry: QueueEntry }>(withAccount(`/api/queue/admin/entries/${encodeURIComponent(entryId)}/action`, accountId), {
+      method: 'POST',
+      body: JSON.stringify({ action }),
+    }),
+  getSettings: (accountId: string) => fetchApi<QueueAdminSettings>(withAccount('/api/queue/admin/settings', accountId)),
+  saveSettings: (
+    accountId: string,
+    body: { settings?: Partial<QueueSettings>; is_open?: boolean; remote_open?: boolean; rotate_token?: boolean },
+  ) =>
+    fetchApi<QueueAdminSettings>(withAccount('/api/queue/admin/settings', accountId), {
+      method: 'PUT',
+      body: JSON.stringify(body),
+    }),
+}
+
+/** 店頭QRに入れる URL。LINE のカメラで読むと順番待ちの画面が開く。 */
+export function queueCheckinUrl(liffId: string, token: string): string {
+  const id = encodeURIComponent(liffId)
+  return `https://liff.line.me/${id}/?page=queue&liffId=${id}&t=${encodeURIComponent(token)}`
+}
+
+/** リッチメニューなどに置く事前受付の URL（合言葉なし）。 */
+export function queueRemoteUrl(liffId: string): string {
+  const id = encodeURIComponent(liffId)
+  return `https://liff.line.me/${id}/?page=queue&liffId=${id}`
+}

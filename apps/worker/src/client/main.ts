@@ -13,6 +13,7 @@
  *   ?redirect=x       — redirect after linking (for wrapped URLs)
  *   ?page=book        — booking page (calendar slot picker, Google Calendar)
  *   ?page=salon-book  — salon booking flow (React, dynamic-imported)
+ *   ?page=queue       — 順番待ち（受付・待ち状況・店頭QRでの到着。&t= は店頭QRの合言葉）
  *   ?page=affiliate   — affiliate self-serve page (React, dynamic-imported)
  *   ?page=webinar     — auto-webinar pseudo-live viewer (React, dynamic-imported; &slug=)
  */
@@ -348,7 +349,7 @@ async function linkAndAddFlow() {
 
 // ─── Salon Booking (React, dynamic-imported) ─────────────
 
-async function initSalonBooking(): Promise<void> {
+async function initSalonBooking(target: 'salon' | 'queue' = 'salon'): Promise<void> {
   // 既存 linkAndAddFlow と同じ初期化シーケンスを踏む:
   //   ① profile + idToken + friendFlag を並列取得
   //   ② /api/liff/link で UUID 確定 (ref/ig 含む) — booking エンドポイントが
@@ -420,6 +421,12 @@ async function initSalonBooking(): Promise<void> {
   const container = document.getElementById('app');
   if (!container) {
     showError('mount target #app が見つかりません');
+    return;
+  }
+  if (target === 'queue') {
+    // 順番待ち（受付・待ち状況・店頭QRでの到着）。予約と同じく友だちだけが使える。
+    const { mountQueue } = await import('./queue/main.js');
+    mountQueue(container, { liffId: LIFF_ID, idToken });
     return;
   }
   const { mountSalonBooking } = await import('./salon-booking/main.js');
@@ -691,6 +698,8 @@ async function main() {
       await initBooking();
     } else if (page === 'salon-book') {
       await initSalonBooking();
+    } else if (page === 'queue') {
+      await initSalonBooking('queue');
     } else if (page === 'event') {
       await initEventBooking('detail');
     } else if (page === 'event-me') {

@@ -285,6 +285,87 @@ const spec = {
         responses: { '200': { description: '{ settings }' } },
       },
     },
+    '/api/liff/queue/status': {
+      get: {
+        tags: ['Queue'],
+        summary: '順番待ちの受付状況（待ち組数・受付できるか）。t に店頭QRの合言葉を付けると、その場の受付ができるかも返す',
+        parameters: [{ name: 'liffId', in: 'query', required: true, schema: { type: 'string' } }, { name: 't', in: 'query', required: false, schema: { type: 'string' } }],
+        responses: { '200': { description: '{ open, waiting_groups, token_valid, walk_in_block, remote_block, settings }' } },
+      },
+    },
+    '/api/liff/queue/me': {
+      get: {
+        tags: ['Queue'],
+        summary: '自分の今日の順番待ち（番号・前に何組・到着済みか）。Authorization: Bearer <id_token>',
+        parameters: [{ name: 'liffId', in: 'query', required: true, schema: { type: 'string' } }],
+        responses: { '200': { description: '{ entry | null }' } },
+      },
+    },
+    '/api/liff/queue/entries': {
+      post: {
+        tags: ['Queue'],
+        summary: '順番待ちに受付（walk_in = 店頭QRからその場で / remote = 事前に）。Authorization: Bearer <id_token>',
+        parameters: [{ name: 'liffId', in: 'query', required: true, schema: { type: 'string' } }],
+        requestBody: { content: { 'application/json': { schema: { type: 'object', properties: { kind: { type: 'string', enum: ['walk_in', 'remote'] }, party_size: { type: 'integer' }, seat_type: { type: 'string' }, token: { type: 'string', description: 'walk_in のとき必須。店頭QRの合言葉' } }, required: ['kind', 'party_size'] } } } },
+        responses: { '201': { description: '{ entry }' }, '403': { description: 'invalid_token / not_following' }, '409': { description: 'already_in_queue / closed / remote_full など' } },
+      },
+    },
+    '/api/liff/queue/checkin': {
+      post: {
+        tags: ['Queue'],
+        summary: '店頭QRを読んで到着にする。飛ばし中だった人は列の一番前に戻る',
+        parameters: [{ name: 'liffId', in: 'query', required: true, schema: { type: 'string' } }],
+        requestBody: { content: { 'application/json': { schema: { type: 'object', properties: { token: { type: 'string' } }, required: ['token'] } } } },
+        responses: { '200': { description: '{ entry }' }, '403': { description: 'invalid_token' } },
+      },
+    },
+    '/api/liff/queue/cancel': {
+      post: {
+        tags: ['Queue'],
+        summary: '自分の順番待ちをキャンセル',
+        parameters: [{ name: 'liffId', in: 'query', required: true, schema: { type: 'string' } }],
+        responses: { '200': { description: 'Cancelled' } },
+      },
+    },
+    '/api/queue/admin/entries': {
+      get: {
+        tags: ['Queue'],
+        summary: '今日の列（並び順）と今日の実績',
+        parameters: [{ name: 'account_id', in: 'query', required: true, schema: { type: 'string' } }],
+        responses: { '200': { description: '{ business_date, is_open, remote_open, waiting_groups, entries, stats }' } },
+      },
+      post: {
+        tags: ['Queue'],
+        summary: 'スタッフが代わりに受付（LINE を使わない人。到着済みで入る）',
+        parameters: [{ name: 'account_id', in: 'query', required: true, schema: { type: 'string' } }],
+        requestBody: { content: { 'application/json': { schema: { type: 'object', properties: { party_size: { type: 'integer' }, seat_type: { type: 'string' }, guest_label: { type: 'string', description: 'お名前など（40文字まで）' } }, required: ['party_size'] } } } },
+        responses: { '201': { description: '{ entry }' } },
+      },
+    },
+    '/api/queue/admin/entries/{id}/action': {
+      post: {
+        tags: ['Queue'],
+        summary: '列の操作。call（到着済みのみ。前の未到着の人は飛ばし中になる）/ recall / visit（マイル queue_visited と来店タグ）/ no_show / defer（1つ後ろへ）/ cancel',
+        parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }, { name: 'account_id', in: 'query', required: true, schema: { type: 'string' } }],
+        requestBody: { content: { 'application/json': { schema: { type: 'object', properties: { action: { type: 'string', enum: ['call', 'recall', 'visit', 'no_show', 'defer', 'cancel'] } }, required: ['action'] } } } },
+        responses: { '200': { description: '{ entry }' }, '409': { description: 'invalid_state / not_arrived' } },
+      },
+    },
+    '/api/queue/admin/settings': {
+      get: {
+        tags: ['Queue'],
+        summary: '順番待ちの設定・受付中かどうか・店頭QRの合言葉',
+        parameters: [{ name: 'account_id', in: 'query', required: true, schema: { type: 'string' } }],
+        responses: { '200': { description: '{ settings, is_open, remote_open, checkin_token, liff_id }' } },
+      },
+      put: {
+        tags: ['Queue'],
+        summary: '順番待ちの設定を保存（送った項目だけ変わる）。rotate_token: true で店頭QRを作り直す',
+        parameters: [{ name: 'account_id', in: 'query', required: true, schema: { type: 'string' } }],
+        requestBody: { content: { 'application/json': { schema: { type: 'object', properties: { settings: { type: 'object', properties: { openTime: { type: 'string', nullable: true }, closeTime: { type: 'string', nullable: true }, remoteStartMinutesBefore: { type: 'integer' }, remoteMaxPercent: { type: 'integer', nullable: true }, remoteStopAtGroups: { type: 'integer', nullable: true }, notifyBeforeGroups: { type: 'integer' }, arrivalTimeoutMinutes: { type: 'integer' }, noShowMinutes: { type: 'integer' }, maxPartySize: { type: 'integer' }, seatTypes: { type: 'array', items: { type: 'string' } }, visitTagId: { type: 'string', nullable: true }, noShowTagId: { type: 'string', nullable: true }, sendConfirmation: { type: 'boolean' } } }, is_open: { type: 'boolean' }, remote_open: { type: 'boolean' }, rotate_token: { type: 'boolean' } } } } } },
+        responses: { '200': { description: '{ settings, is_open, remote_open, checkin_token, liff_id }' } },
+      },
+    },
     '/api/booking/admin/staff/{id}/priority': {
       get: {
         tags: ['Booking'],
