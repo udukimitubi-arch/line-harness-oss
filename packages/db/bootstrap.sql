@@ -814,6 +814,44 @@ CREATE TABLE IF NOT EXISTS pool_accounts (
   UNIQUE(pool_id, line_account_id)
 );
 
+CREATE TABLE IF NOT EXISTS queue_entries (
+  id                TEXT PRIMARY KEY,
+  line_account_id   TEXT NOT NULL,
+  business_date     TEXT NOT NULL,
+  ticket_no         INTEGER NOT NULL,
+  -- LINE を使わない人をスタッフが代わりに受付したときは NULL。
+  friend_id         TEXT,
+  guest_label       TEXT,
+  party_size        INTEGER NOT NULL,
+  seat_type         TEXT,
+  kind              TEXT NOT NULL CHECK (kind IN ('walk_in', 'remote', 'staff')),
+  status            TEXT NOT NULL CHECK (status IN ('waiting', 'called', 'visited', 'no_show', 'cancelled')),
+  -- 列の並び。小さいほど前。後回し・到着時の繰り上げはこの値を動かす。
+  sort_key          REAL NOT NULL,
+  arrived_at        TEXT,
+  -- 到着前に順番が来て、次の人を先に呼んだ時刻。
+  passed_at         TEXT,
+  near_notified_at  TEXT,
+  called_at         TEXT,
+  call_count        INTEGER NOT NULL DEFAULT 0,
+  finished_at       TEXT,
+  cancel_reason     TEXT,
+  created_at        TEXT NOT NULL,
+  updated_at        TEXT NOT NULL,
+  UNIQUE (line_account_id, business_date, ticket_no)
+);
+
+CREATE TABLE IF NOT EXISTS queue_settings (
+  line_account_id  TEXT PRIMARY KEY,
+  -- 受付時間・事前受付の上限・お知らせの組数などの決まり（services/queue.ts の QueueSettings）。
+  settings_json    TEXT NOT NULL DEFAULT '{}',
+  -- 店頭QRに入れる合言葉。これを持っている人だけが「その場で受付」と「到着」をできる。
+  checkin_token    TEXT NOT NULL,
+  is_open          INTEGER NOT NULL DEFAULT 1,
+  remote_open      INTEGER NOT NULL DEFAULT 1,
+  updated_at       TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%f', 'now', '+9 hours'))
+);
+
 CREATE TABLE IF NOT EXISTS ref_tracking (
   id              TEXT PRIMARY KEY,
   ref_code        TEXT NOT NULL,
@@ -1395,6 +1433,12 @@ CREATE INDEX IF NOT EXISTS idx_notifications_event_account ON notifications (eve
 
 CREATE INDEX IF NOT EXISTS idx_notifications_status ON notifications (status);
 
+CREATE INDEX IF NOT EXISTS idx_queue_entries_active
+  ON queue_entries(line_account_id, business_date, status, sort_key);
+
+CREATE INDEX IF NOT EXISTS idx_queue_entries_friend
+  ON queue_entries(friend_id, business_date, status);
+
 CREATE INDEX IF NOT EXISTS idx_ref_tracking_friend ON ref_tracking (friend_id);
 
 CREATE INDEX IF NOT EXISTS idx_ref_tracking_friend_created ON ref_tracking(friend_id, created_at);
@@ -1486,6 +1530,10 @@ CREATE INDEX IF NOT EXISTS idx_webinar_viewers_webinar
 CREATE UNIQUE INDEX IF NOT EXISTS uq_google_calendar_connections_active_staff
   ON google_calendar_connections (staff_id)
   WHERE staff_id IS NOT NULL AND is_active = 1;
+
+CREATE UNIQUE INDEX IF NOT EXISTS uq_queue_entries_active_friend
+  ON queue_entries(line_account_id, friend_id, business_date)
+  WHERE friend_id IS NOT NULL AND status IN ('waiting', 'called');
 
 INSERT OR IGNORE INTO auto_replies (id, keyword, match_type, response_type, response_content, template_id, line_account_id, is_active, created_at)
 VALUES ('builtin-mileage-wallet-keyword', 'マイル', 'exact', 'flex', '{"type":"bubble","size":"kilo","body":{"type":"box","layout":"vertical","paddingAll":"20px","contents":[{"type":"text","text":"あなたのHarnessマイル","weight":"bold","size":"lg","color":"#1e293b"},{"type":"text","text":"現在のマイル、獲得履歴、登録済みアカウント、次にマイルを獲得できる行動を確認できます。","wrap":true,"size":"sm","color":"#64748b","margin":"md"}]},"footer":{"type":"box","layout":"vertical","paddingAll":"16px","contents":[{"type":"button","style":"primary","color":"#06C755","height":"sm","action":{"type":"uri","label":"マイルを確認する","uri":"https://liff.line.me/{{liff_id}}/?page=affiliate&liffId={{liff_id}}"}}]}}', NULL, NULL, 1, '2026-08-11T00:00:00.000+09:00');

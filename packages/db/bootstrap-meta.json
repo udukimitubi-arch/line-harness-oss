@@ -80,7 +80,8 @@
     "072_health_logs_composite_index.sql",
     "073_booking_automation.sql",
     "074_booking_meet.sql",
-    "075_booking_rules.sql"
+    "075_booking_rules.sql",
+    "076_queue.sql"
   ],
-  "migrationCount": 81
+  "migrationCount": 82
 }
