@@ -1018,7 +1018,8 @@ export const api = {
         method: 'PUT',
         body: JSON.stringify(data),
       }),
-    send: (id: string, data: { content: string; messageType?: string }) =>
+    /** expectedLineAccountId を付けると、実際の送信元アカウントと違うときは送らずに 409（account_mismatch）。 */
+    send: (id: string, data: { content: string; messageType?: string; expectedLineAccountId?: string | null }) =>
       fetchApi<ApiResponse<unknown>>(`/api/chats/${id}/send`, {
         method: 'POST',
         body: JSON.stringify(data),
