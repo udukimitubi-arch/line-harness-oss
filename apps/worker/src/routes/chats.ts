@@ -360,6 +360,7 @@ chats.get('/api/chats', async (c) => {
       friendId: ch.friend_id,
       friendName: ch.display_name || '名前なし',
       friendPictureUrl: ch.picture_url || null,
+      lineAccountId: (ch.line_account_id as string | null) ?? null,
       operatorId: ch.operator_id,
       status: ch.status,
       notes: ch.notes,
@@ -433,9 +434,9 @@ chats.get('/api/chats/:id', async (c) => {
     const createdAt = chatRow?.created_at ?? null;
 
     const friend = await c.env.DB
-      .prepare(`SELECT display_name, picture_url, line_user_id FROM friends WHERE id = ?`)
+      .prepare(`SELECT display_name, picture_url, line_user_id, line_account_id FROM friends WHERE id = ?`)
       .bind(resolvedFriendId)
-      .first<{ display_name: string | null; picture_url: string | null; line_user_id: string }>();
+      .first<{ display_name: string | null; picture_url: string | null; line_user_id: string; line_account_id: string | null }>();
 
     // 新しい1000件を取って昇順に戻す。LIMIT 200 ASC だと古い200件だけで broadcast/scenario 等の
     // 新しい push が欠落していた（Shu で 481件中 281件欠落のバグあり）。一覧側と同様に test 配信は除外。
@@ -458,6 +459,7 @@ chats.get('/api/chats/:id', async (c) => {
         friendId: resolvedFriendId,
         friendName: friend?.display_name || '名前なし',
         friendPictureUrl: friend?.picture_url || null,
+        lineAccountId: friend?.line_account_id ?? null,
         operatorId,
         status,
         notes,
@@ -560,7 +562,9 @@ chats.post('/api/chats/:id/send', async (c) => {
     const chat = await resolveOrCreateChat(c.env.DB, chatId);
     if (!chat) return c.json({ success: false, error: 'Chat not found' }, 404);
 
-    const body = await c.req.json<{ messageType?: string; content: string; trackLinks?: boolean }>();
+    // expectedLineAccountId: 画面に出していた送信元アカウント。実際の送信元と違えば送らない
+    // （まとめて受信箱での送り間違い防止）。省略時は今までどおり。
+    const body = await c.req.json<{ messageType?: string; content: string; trackLinks?: boolean; expectedLineAccountId?: string | null }>();
     if (typeof body.content !== 'string' || !body.content) return c.json({ success: false, error: 'content is required' }, 400);
     const messageType = body.messageType ?? 'text';
     if (!['text', 'flex', 'image'].includes(messageType)) {
@@ -576,6 +580,9 @@ chats.post('/api/chats/:id/send', async (c) => {
       c.env.LINE_CHANNEL_ACCESS_TOKEN,
     );
     if (!friend) return c.json({ success: false, error: 'Friend not found' }, 404);
+    if (body.expectedLineAccountId !== undefined && (body.expectedLineAccountId ?? null) !== (lineAccountId ?? null)) {
+      return c.json({ success: false, error: 'account_mismatch' }, 409);
+    }
 
     // LINE APIでメッセージ送信
     const { LineClient } = await import('@line-crm/line-sdk');

@@ -45,7 +45,7 @@ describe('chat reply tracking and delivery logs', () => {
     vi.restoreAllMocks();
   });
 
-  function send(body: { content: string; messageType?: string; trackLinks?: boolean }, id = 'chat-a', workerUrl?: string) {
+  function send(body: { content: string; messageType?: string; trackLinks?: boolean; expectedLineAccountId?: string | null }, id = 'chat-a', workerUrl?: string) {
     return app.request(`${WORKER}/api/chats/${id}/send`, {
       method: 'POST', headers: { 'Content-Type': 'application/json', Origin: 'https://untrusted-admin.example' }, body: JSON.stringify(body),
     }, { DB: fixture.db, LINE_CHANNEL_ACCESS_TOKEN: 'synthetic-unrelated-default', ...(workerUrl === undefined ? {} : { WORKER_URL: workerUrl }) });
@@ -65,6 +65,18 @@ describe('chat reply tracking and delivery logs', () => {
     expect(fixture.sqlite.prepare('SELECT message_type,content,source,line_account_id FROM messages_log WHERE friend_id=?').get(friend))
       .toEqual({ message_type: message.type, content, source: 'manual', line_account_id: account });
   }
+
+  it('refuses to send when the account shown on screen is not the real sender (まとめて受信箱)', async () => {
+    const wrong = await send({ content: 'hello', expectedLineAccountId: 'account-b' }, 'chat-a');
+    expect(wrong.status).toBe(409);
+    expect(await wrong.json()).toEqual({ success: false, error: 'account_mismatch' });
+    expect(requests).toHaveLength(0);
+    expect(fixture.sqlite.prepare('SELECT COUNT(*) AS n FROM messages_log').get()).toEqual({ n: 0 });
+
+    const right = await send({ content: 'hello', expectedLineAccountId: 'account-a' }, 'chat-a');
+    expect(right.status).toBe(200);
+    expect(requests).toEqual([expect.objectContaining({ token: 'synthetic-token-a', to: 'line-friend-a' })]);
+  });
 
   it('uses each recipient account for both its current token and owned tracked link, with distinct friend attribution', async () => {
     fixture.sqlite.exec("UPDATE line_accounts SET channel_access_token='synthetic-rotated-b' WHERE id='account-b'");
